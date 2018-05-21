@@ -155,13 +155,19 @@ public class NodeApp {
 			
 			//pulire tutti i last message perche non li devo mandare in giro.
 			
+			for (int key : newView.keySet()){
+				newView.get(key).lastMessage = null;
+				newView.get(key).timer = 0;
+			}
 			//
 			mess.ref.tell(new joinResponse(IDactor), getSelf());
 			
 			
 			//ciclo for per mandare a tutti nella nuova view il messaggio dio changeview !
 			
-			
+			for (int key : newView.keySet()){
+				newView.get(key).ref.tell(new changeView(newIDview, newView), getSelf());
+			}
 			
 			IDactor++;
 			
