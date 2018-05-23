@@ -134,24 +134,29 @@ public class NodeApp {
 				//mi metto nello stato di sto aspettando di entrare
 				onJoin = true;
 				//invio la richiesta di entrare
+				System.out.println("cerco di entrare e chiedo a " + remotePath);
 				getContext().actorSelection(remotePath).tell(new joinRequest( getSelf() ) , getSelf());
+				System.out.println("ho mandato il messaggio");
 			}
 			else{
 				//il coordinatore si riconosce e si autosetta il proprio id
 				//e si inserisce nella view.
 				id = 0;
+				System.out.println("sono il Coordinator");
 				view.put(id, new actorData(getSelf(), null, 0));
+				System.out.println("e questa e' la view: " + view.toString() );
+				
 			}
 		}
 		
 		
 		
 		private void onJoinRequest (joinRequest mess){
+			System.out.println("mi e' arrivata una richiesta da: " + mess.ref);
 			newIDview = IDview+1;
 			newView.clear();
 			newView.putAll(view);
 			newView.put(IDactor, new actorData(mess.ref, null, 0));
-			
 			
 			//pulire tutti i last message perche non li devo mandare in giro.
 			
@@ -159,53 +164,110 @@ public class NodeApp {
 				newView.get(key).lastMessage = null;
 				newView.get(key).timer = 0;
 			}
-			//
+			
+			//mando un messaggio a chi vuole entrare
+			System.out.println("sto mandando il messaggio a: " + IDactor);
 			mess.ref.tell(new joinResponse(IDactor), getSelf());
 			
+			//ciclo for per mandare a tutti nella nuova view il messaggio di changeview !
 			
-			//ciclo for per mandare a tutti nella nuova view il messaggio dio changeview !
+			//mettere questo ciclo in una funzione e sara nominata multicast
 			
 			for (int key : newView.keySet()){
+				System.out.println("mando il messaggio di changeview a: " + key + " --- " + newView.get(key).ref.toString());
 				newView.get(key).ref.tell(new changeView(newIDview, newView), getSelf());
 			}
 			
 			IDactor++;
-			
 		}
 		
+		private void onJoinResponse(joinResponse mess){
+			
+			this.id = mess.IDactor;
+			System.out.println("mi è arrivata la risposta di join e sono: " + mess.IDactor);
+			
+		}
 		
 		
 		private void onChangeView (changeView mess){
+			this.onChange = true;
+			
+			this.newIDview = mess.newIDView;
+			this.newView = mess.newView;
+			
+			System.out.println("devo cambiare view");
+			if(!onJoin){
+				//qui bisognerebbe mettere il fatto che inviamo a tutti la nostra cache 
+			}
+			else{
+				System.out.println("sono nuovo e devo mandare solo i FLUSH");
+			}
+			
+			
+			for (int key : newView.keySet()){
+
+				newView.get(key).ref.tell(new FLUSH(id), getSelf());
+				System.out.println("mando il FLUSH a: " + key + " --- " + newView.get(key).ref );
+			}
+			
 			
 		}
 		
+		
+		
+		
 		private void onFLUSH (FLUSH mess){
+			
+			System.out.println("arrivato messaggio da: " + mess.ID);
+			
+			this.newView.get(mess.ID).lastMessage = mess;
+			
+			
+			//ciclo su tutti e se tutti sono in flush io installo la view
+			
+			boolean install = true;
+			for (int key : newView.keySet()){
+				System.out.println("vedo il " + key + " con il messaggio : " + this.newView.get(key).lastMessage.toString());
+				if (this.newView.get(key).lastMessage != null ){
+					if (! (this.newView.get(key).lastMessage instanceof FLUSH)){
+						install = false;
+					}
+				}
+				else{
+					install = false;
+				}
+			}
+			
+			if(install){
+				System.out.println("view stabile ora installo");
+				installView();
+			}
+			
+		}
+		
+		
+		private void installView(){
+			//pulisco la nuova view dai messaggi di FLUSH salvati
+			for (int key : newView.keySet()){
+				newView.get(key).lastMessage = null;
+			}
+			//
+			this.view = this.newView;
+			this.newView = null;
+			
+			this.IDview = this.newIDview;
 			
 		}
 
-		private void onRequestNodelist(RequestNodelist message) {
-			getSender().tell(new Nodelist(nodes), getSelf());
-		}
-
-		private void onNodelist(Nodelist message) {
-			nodes.putAll(message.nodes);
-			for (ActorRef n : nodes.values()) {
-				n.tell(new Join(this.id), getSelf());
-			}
-		}
-
-		private void onJoin(Join message) {
-			int id = message.id;
-			System.out.println("Node " + id + " joined");
-			nodes.put(id, getSender());
-		}
+		
 
 		@Override
 		public Receive createReceive() {
 			return receiveBuilder()
-					.match(RequestNodelist.class, this::onRequestNodelist)
-					.match(Nodelist.class, this::onNodelist)
-					.match(Join.class, this::onJoin)
+					.match(joinRequest.class, this::onJoinRequest)
+					.match(joinResponse.class, this::onJoinResponse)
+					.match(changeView.class, this::onChangeView)
+					.match(FLUSH.class, this::onFLUSH)
 					.build();
 		}
 	}
