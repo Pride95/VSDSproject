@@ -74,6 +74,8 @@ public class NodeApp {
 			this.ID = ID;
 		}
 	}
+	
+	
 
 	
 	
@@ -87,8 +89,10 @@ public class NodeApp {
 		private Map<Integer, actorData> view = new HashMap<>();
 		private int IDview;
 		
-		private Map<Integer, actorData> newView = new HashMap<>();
+		private Map<Integer, actorData> newView = null;
 		private int newIDview;
+		
+		private Map<Integer, genericMessage> tempFLUSH = new HashMap<>();
 		
 		
 		private boolean onJoin = false;
@@ -140,7 +144,7 @@ public class NodeApp {
 		private void onJoinRequest (joinRequest mess){
 			System.out.println("mi e' arrivata una richiesta da: " + mess.ref);
 			newIDview = IDview+1;
-			newView.clear();
+			newView = new HashMap<>();
 			newView.putAll(view);
 			newView.put(IDactor, new actorData(mess.ref, null, 0));
 			
@@ -181,6 +185,13 @@ public class NodeApp {
 			this.newIDview = mess.newIDView;
 			this.newView = mess.newView;
 			
+			if(tempFLUSH != null){
+				for(int key : tempFLUSH.keySet()){
+					newView.get(key).lastMessage = tempFLUSH.get(key);
+				}
+				tempFLUSH = null;
+			}
+			
 			System.out.println("devo cambiare view");
 			if(!onJoin){
 				//qui bisognerebbe mettere il fatto che inviamo a tutti la nostra cache 
@@ -211,31 +222,40 @@ public class NodeApp {
 			
 			System.out.println("arrivato messaggio da: " + mess.ID);
 			
-			this.newView.get(mess.ID).lastMessage = mess;
+			if(newView == null && !onChange){
+				System.out.println("mi è arrivato un FLUSH prima che fossi in onChangeView");
+				if(tempFLUSH == null){
+					tempFLUSH = new HashMap<>();
+				}
+				tempFLUSH.put(mess.ID, mess);
+			}
+			else{
 			
-			
-			//ciclo su tutti e se tutti sono in flush io installo la view
-			
-			boolean install = true;
-			for (int key : newView.keySet()){
-				
-				if (this.newView.get(key).lastMessage != null ){
-					System.out.println("vedo il " + key + " con il messaggio : " + this.newView.get(key).lastMessage.toString());
-					if (! (this.newView.get(key).lastMessage instanceof FLUSH)){
+				this.newView.get(mess.ID).lastMessage = mess;
+
+
+				//ciclo su tutti e se tutti sono in flush io installo la view
+
+				boolean install = true;
+				for (int key : newView.keySet()){
+
+					if (this.newView.get(key).lastMessage != null ){
+						System.out.println("vedo il " + key + " con il messaggio : " + this.newView.get(key).lastMessage.toString());
+						if (! (this.newView.get(key).lastMessage instanceof FLUSH)){
+							install = false;
+						}
+					}
+					else{
+						System.out.println("il last messaggio da " + key + " era NULL");
 						install = false;
 					}
 				}
-				else{
-					System.out.println("il last messaggio da " + key + " era NULL");
-					install = false;
+
+				if(install){
+					System.out.println("view stabile ora installo");
+					installView();
 				}
 			}
-			
-			if(install){
-				System.out.println("view stabile ora installo");
-				installView();
-			}
-			
 		}
 		
 		
@@ -250,6 +270,8 @@ public class NodeApp {
 			
 			this.IDview = this.newIDview;
 			
+			this.onChange = false;
+			this.onJoin = false;
 		}
 
 		
