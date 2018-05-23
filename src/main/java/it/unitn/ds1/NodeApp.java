@@ -75,7 +75,16 @@ public class NodeApp {
 		}
 	}
 	
-	
+	public static class normalMessage extends genericMessage implements Serializable{
+		//id di chi lo manda
+		int senderID;
+		int messageID;
+
+		public normalMessage(int senderID, int messageID) {
+			this.senderID = senderID;
+			this.messageID = messageID;
+		}
+	}
 
 	
 	
@@ -99,9 +108,14 @@ public class NodeApp {
 		private boolean onChange = false;
 		
 		private String remotePath = null;
+		
+		//questo è il proprio id di ciascun nodo
 		private int id;
 		
+		//questo è l'id assegnato agli attori che si uniscono ed è uso esclusivo del coordinator
 		private int IDactor = 1;
+		
+		private int messageID = 0;
 
 		
 		
@@ -195,6 +209,14 @@ public class NodeApp {
 			System.out.println("devo cambiare view");
 			if(!onJoin){
 				//qui bisognerebbe mettere il fatto che inviamo a tutti la nostra cache 
+				
+				for(int key : view.keySet()){
+					if(view.get(key).lastMessage != null){
+						multicast(newView, view.get(key).lastMessage);
+					}
+				}
+				
+				
 			}
 			else{
 				System.out.println("sono nuovo e devo mandare solo i FLUSH");
@@ -259,6 +281,37 @@ public class NodeApp {
 		}
 		
 		
+		private void onNormalMessage(normalMessage mess){
+			if(!onJoin){
+				//faccio l'handling
+				int idSenderActor = mess.senderID;
+				int idMessage = mess.messageID;
+				normalMessage last = (normalMessage) view.get(idSenderActor).lastMessage;
+				
+				if(last != null){
+					if(last.messageID < idMessage){
+						//ne è arrivato uno più recente adesso li cambio
+						view.get(idSenderActor).lastMessage = mess;
+						deliver(mess);
+					}
+					else{
+						System.out.println("Ho ricevuto un messaggio vecchio o uguale a quello della mia cache");
+						System.out.println("Questo messaggio non lo considero");
+						//non lo considero perche o è uguale o è più vecchio e quindi ne avro di sicuro fatto il delivery
+					}
+				}
+				else{
+					view.get(idSenderActor).lastMessage = mess;
+					deliver(mess);
+				}
+				
+			}
+			else{
+				//sono in onJoin quindi li scarto cioè termino il metodo senza fare niente
+			}
+		}
+		
+		
 		private void installView(){
 			//pulisco la nuova view dai messaggi di FLUSH salvati
 			for (int key : newView.keySet()){
@@ -274,7 +327,15 @@ public class NodeApp {
 			this.onJoin = false;
 		}
 
+		private void multicast(Map<Integer, actorData> v, genericMessage m){
+			for(int key : v.keySet()){
+				v.get(key).ref.tell(m, getSelf());
+			}
+		}
 		
+		private void deliver(normalMessage m){
+			System.out.println("Deliver nuovo messaggio con id : " + m.messageID + " mandato da: " + m.senderID);
+		}
 
 		@Override
 		public Receive createReceive() {
@@ -283,6 +344,7 @@ public class NodeApp {
 					.match(joinResponse.class, this::onJoinResponse)
 					.match(changeView.class, this::onChangeView)
 					.match(FLUSH.class, this::onFLUSH)
+					.match(normalMessage.class, this::onNormalMessage)
 					.build();
 		}
 	}
