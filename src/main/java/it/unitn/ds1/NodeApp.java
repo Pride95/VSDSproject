@@ -59,7 +59,12 @@ public class NodeApp {
 
 		public changeView(int newIDView, Map<Integer, actorData> newView) {
 			this.newIDView = newIDView;
-			this.newView = newView;
+			//this.newView = newView;
+			this.newView = new HashMap<>();
+			for(int key : newView.keySet()){
+				this.newView.put(key, new actorData(newView.get(key).ref, null, 0));
+			}
+			
 		}
 	}
 	
@@ -67,25 +72,6 @@ public class NodeApp {
 		int ID;
 		public FLUSH(int ID) {
 			this.ID = ID;
-		}
-	}
-	
-	
-	
-	
-	
-	public static class Join  implements Serializable {
-		int id;
-		public Join(int id) {
-			this.id = id;
-		}
-	}
-	public static class RequestNodelist implements Serializable {}
-	public static class Nodelist implements Serializable {
-		//messaggio contente la view
-		Map<Integer, ActorRef> nodes;
-		public Nodelist(Map<Integer, ActorRef> nodes) {
-			this.nodes = Collections.unmodifiableMap(new HashMap<Integer, ActorRef>(nodes));
 		}
 	}
 
@@ -205,8 +191,13 @@ public class NodeApp {
 			
 			
 			for (int key : newView.keySet()){
-
+				//newView.get(key).lastMessage = null;
+				if(newView.get(key).lastMessage != null){
+					System.out.println("il messaggio che e' gia nella view e': " + newView.get(key).lastMessage.toString());
+				}
+				
 				newView.get(key).ref.tell(new FLUSH(id), getSelf());
+				
 				System.out.println("mando il FLUSH a: " + key + " --- " + newView.get(key).ref );
 			}
 			
@@ -227,13 +218,15 @@ public class NodeApp {
 			
 			boolean install = true;
 			for (int key : newView.keySet()){
-				System.out.println("vedo il " + key + " con il messaggio : " + this.newView.get(key).lastMessage.toString());
+				
 				if (this.newView.get(key).lastMessage != null ){
+					System.out.println("vedo il " + key + " con il messaggio : " + this.newView.get(key).lastMessage.toString());
 					if (! (this.newView.get(key).lastMessage instanceof FLUSH)){
 						install = false;
 					}
 				}
 				else{
+					System.out.println("il last messaggio da " + key + " era NULL");
 					install = false;
 				}
 			}
