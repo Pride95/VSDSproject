@@ -110,6 +110,10 @@ public class NodeApp {
 
 	
 	
+        
+        
+        
+        
 	public static class Node extends AbstractActor {
 
 		// The table of all nodes in the system id->ref
