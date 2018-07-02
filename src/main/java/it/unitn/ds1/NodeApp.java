@@ -15,6 +15,9 @@ import akka.actor.Cancellable;
 import scala.concurrent.duration.Duration;
 import com.typesafe.config.ConfigFactory;
 import com.typesafe.config.Config;
+import java.util.Random;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class NodeApp {
 
@@ -25,9 +28,9 @@ public class NodeApp {
 	private static class actorData implements Serializable{
 		ActorRef ref;
 		genericMessage lastMessage;
-		int timer;
+		long timer;
 
-		public actorData(ActorRef ref, genericMessage lastMessage, int timer) {
+		public actorData(ActorRef ref, genericMessage lastMessage, long timer) {
 			this.ref = ref;
 			this.lastMessage = lastMessage;
 			this.timer = timer;
@@ -79,10 +82,12 @@ public class NodeApp {
 		//id di chi lo manda
 		int senderID;
 		int messageID;
+		int IDview;
 
-		public normalMessage(int senderID, int messageID) {
+		public normalMessage(int senderID, int messageID, int v) {
 			this.senderID = senderID;
 			this.messageID = messageID;
+			this.IDview = v;
 		}
 	}
 
@@ -99,6 +104,7 @@ public class NodeApp {
 		private int IDview;
 		
 		private Map<Integer, actorData> newView = null;
+		
 		private int newIDview;
 		
 		private Map<Integer, genericMessage> tempFLUSH = new HashMap<>();
@@ -116,6 +122,9 @@ public class NodeApp {
 		private int IDactor = 1;
 		
 		private int messageID = 0;
+		
+		Random rand = new Random();
+		
 
 		
 		
@@ -164,6 +173,8 @@ public class NodeApp {
 			
 			//pulire tutti i last message perche non li devo mandare in giro.
 			
+			
+			
 			for (int key : newView.keySet()){
 				newView.get(key).lastMessage = null;
 				newView.get(key).timer = 0;
@@ -206,19 +217,30 @@ public class NodeApp {
 				tempFLUSH = null;
 			}
 			
-			System.out.println("devo cambiare view");
+			System.out.println("devo cambiare view, la nuova view e' :" + printView(newView) );
 			if(!onJoin){
-				//qui bisognerebbe mettere il fatto che inviamo a tutti la nostra cache 
+				
+				//INVIO CACHE
+				int numMessaggi = 0;
+				
+				System.out.println("INVIO CACHE");
+				System.out.println("la vecchia view e' : " + printView(view));
 				
 				for(int key : view.keySet()){
 					if(view.get(key).lastMessage != null){
+						System.out.println("inizio invio messaggio " + ((normalMessage)view.get(key).lastMessage).messageID +
+								" inviato dal peer " + ((normalMessage)view.get(key).lastMessage).senderID + 
+								" appartenente alla view " + ((normalMessage)view.get(key).lastMessage).IDview);
 						multicast(newView, view.get(key).lastMessage);
+						numMessaggi++;
 					}
 				}
 				
+				System.out.println("sono stati inviati " + numMessaggi + " messaggi di cache ");
 				
 			}
 			else{
+				
 				System.out.println("sono nuovo e devo mandare solo i FLUSH");
 			}
 			
@@ -237,12 +259,9 @@ public class NodeApp {
 			
 		}
 		
-		
-		
-		
 		private void onFLUSH (FLUSH mess){
 			
-			System.out.println("arrivato messaggio da: " + mess.ID);
+			System.out.println("arrivato un messaggio di FLUSH da: " + mess.ID);
 			
 			if(newView == null && !onChange){
 				System.out.println("mi è arrivato un FLUSH prima che fossi in onChangeView");
@@ -262,7 +281,7 @@ public class NodeApp {
 				for (int key : newView.keySet()){
 
 					if (this.newView.get(key).lastMessage != null ){
-						System.out.println("vedo il " + key + " con il messaggio : " + this.newView.get(key).lastMessage.toString());
+						//System.out.println("vedo il " + key + " con il messaggio : " + this.newView.get(key).lastMessage.toString());
 						if (! (this.newView.get(key).lastMessage instanceof FLUSH)){
 							install = false;
 						}
@@ -280,13 +299,41 @@ public class NodeApp {
 			}
 		}
 		
-		
 		private void onNormalMessage(normalMessage mess){
 			if(!onJoin){
 				//faccio l'handling
 				int idSenderActor = mess.senderID;
 				int idMessage = mess.messageID;
 				normalMessage last = (normalMessage) view.get(idSenderActor).lastMessage;
+				
+				//sono il coordinator
+				if(id == 0){
+					if(!onChange){
+						//non si sta cambiando la view quindi lavoro sulla vecchia view
+						view.get(idSenderActor).timer = System.currentTimeMillis();
+						timeCheck(view);
+					}
+					else{
+						//si sta cambiando la view quindi questi sono messaggi di cache
+						//quindi lavoro sulla newView
+						
+						ActorRef f = getSender();
+						
+						System.out.println("Arrivato messaggio di cache inerente al peer " + idSenderActor + "  ");
+						
+						int realSender = getKeyFromValue(newView, f);
+						
+						actorData acData = newView.get(realSender);
+						if( acData != null){
+							newView.get(realSender).timer = System.currentTimeMillis();
+						}
+						else{
+							//in questo branch non puo entrare 
+							System.out.println("c'e' un errore da controllare alla riga 324");
+						}
+						timeCheck(newView);
+					}
+				}
 				
 				if(last != null){
 					if(last.messageID < idMessage){
@@ -295,8 +342,7 @@ public class NodeApp {
 						deliver(mess);
 					}
 					else{
-						System.out.println("Ho ricevuto un messaggio vecchio o uguale a quello della mia cache");
-						System.out.println("Questo messaggio non lo considero");
+						System.out.println("Ho ricevuto il messaggio: " + idMessage + " da " + idSenderActor + " vecchio, lo considero");
 						//non lo considero perche o è uguale o è più vecchio e quindi ne avro di sicuro fatto il delivery
 					}
 				}
@@ -305,19 +351,32 @@ public class NodeApp {
 					deliver(mess);
 				}
 				
+				System.out.println("la view nel in questo momento e' : " + printView(view));
+				
+				//metto un controllo cosi ne invia solo un numero fisso
+				if(!onChange && idSenderActor == id && messageID < 400){
+					normalMessage m = new normalMessage(id, messageID, IDview);
+					messageID++;
+					
+					System.out.println("nella onNormalMessage inizio invio messaggio " + m.messageID + " appartenente alla view " + IDview);
+					
+					multicast(view, m);
+				}
+				
 			}
 			else{
 				//sono in onJoin quindi li scarto cioè termino il metodo senza fare niente
+				System.out.println("sono nuovo e quindi mi e' arrivato un messaggio e lo scarto");
 			}
 		}
-		
-		
+				
 		private void installView(){
 			//pulisco la nuova view dai messaggi di FLUSH salvati
 			for (int key : newView.keySet()){
 				newView.get(key).lastMessage = null;
+				newView.get(key).timer = 0;
 			}
-			//
+			
 			this.view = this.newView;
 			this.newView = null;
 			
@@ -325,16 +384,121 @@ public class NodeApp {
 			
 			this.onChange = false;
 			this.onJoin = false;
-		}
+			
+			//metto un controllo cosi ne invia solo un numero fisso
+			if(messageID < 400){
+				//qui cominciamo a inviare oppure a riprendere
 
-		private void multicast(Map<Integer, actorData> v, genericMessage m){
-			for(int key : v.keySet()){
-				v.get(key).ref.tell(m, getSelf());
+				normalMessage m = new normalMessage(id, messageID, IDview);
+				messageID++;
+				
+				System.out.println("nella installView inizio invio messaggio " + m.messageID + " appartenente alla view " + IDview);
+				
+				multicast(view, m);
 			}
 		}
 		
+		private void timeCheck(Map<Integer, actorData> currentview){
+			
+			long current = System.currentTimeMillis();
+			
+			int timeout = 4000; //sono millisecond
+			
+			Map<Integer, actorData> tempView = new HashMap<>();
+			tempView.putAll(currentview);
+			
+			boolean crash = false;
+			
+			for(int key : currentview.keySet()){
+				if(currentview.get(key).timer != 0 ){
+					long difference = current - currentview.get(key).timer;
+					
+					boolean wasFLUSH = false;
+					
+					genericMessage last = currentview.get(key).lastMessage;
+					
+					if(last != null){
+						if(last instanceof FLUSH){
+							wasFLUSH = true;
+						}
+					}
+					
+					if(difference > timeout && !wasFLUSH){
+						crash = true;
+						System.out.println("CRASH !!!!!! il peer " + key + " non risponde da " + difference);
+						tempView.remove(key);
+					}
+				}
+				else{
+					currentview.get(key).timer = current;
+				}
+				
+			}
+			
+			if(crash){
+				newIDview = IDview+1;
+				newView = new HashMap<>();
+				newView.putAll(tempView);
+				
+				for (int key : newView.keySet()){
+					newView.get(key).lastMessage = null;
+					newView.get(key).timer = 0;
+				}
+				
+				System.out.println("CRASH individuato e la nuova view e' : " + printView(newView));
+				
+				for (int key : newView.keySet()){
+					System.out.println("mando il messaggio di changeview a: " + key + " --- " + newView.get(key).ref.toString());
+					newView.get(key).ref.tell(new changeView(newIDview, newView), getSelf());
+				}
+				
+			}
+		}
+		
+		
+		private int getKeyFromValue(Map<Integer, actorData> m, ActorRef re){
+			int returnedKey = 0;
+			for(int key : m.keySet()){
+				if(m.get(key).ref == re){
+					returnedKey = key;
+				}
+			}
+			return returnedKey;
+		}
+		
+		private String printView(Map<Integer, actorData> m){
+			String word = "";
+			word = word + "{ \n" ;
+			for(int key : m.keySet()){
+				word = word + key + " = \n \t" ;
+				word = word + "ref : " + m.get(key).ref + " \n \t" ;
+				if(m.get(key).lastMessage != null){
+					word = word + "last message = messageID : " + ((normalMessage)m.get(key).lastMessage).messageID +
+							" senderID : " + ((normalMessage)m.get(key).lastMessage).senderID +
+							" \n \t" ;
+				}else{
+					word = word + "last message = NULL \n \t";
+				}
+				word = word + "timer : " + m.get(key).timer + " \n";
+			}
+			word = word + "} \n" ;
+			return word;
+		}
+		
 		private void deliver(normalMessage m){
-			System.out.println("Deliver nuovo messaggio con id : " + m.messageID + " mandato da: " + m.senderID);
+			System.out.println("Deliver nuovo messaggio con id : " + m.messageID + " mandato da: " + m.senderID + " inviata nella view : " + m.IDview + " siamo nella view " + IDview);
+		}
+		
+		private void multicast(Map<Integer, actorData> v, genericMessage m){
+			int timeSleep = rand.nextInt(1000) + 1000 ;
+			try {
+				Thread.sleep(timeSleep);
+			} catch (InterruptedException ex) {
+				Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
+			}
+			for(int key : v.keySet()){
+				v.get(key).ref.tell(m, getSelf());
+			}
 		}
 
 		@Override
