@@ -271,7 +271,7 @@ public class NodeApp {
 				System.out.println("sono nuovo e devo mandare solo i FLUSH");
 			}
 			
-			
+			/*
 			for (int key : newView.keySet()){
 				//newView.get(key).lastMessage = null;
 				if(newView.get(key).lastMessage != null){
@@ -281,8 +281,10 @@ public class NodeApp {
 				newView.get(key).ref.tell(new FLUSH(id), getSelf());
 				
 				System.out.println("mando il FLUSH a: " + key + " --- " + newView.get(key).ref );
-			}
-			
+			}*/
+                        System.out.println("comincio a mandare i messaggi di flush");
+                        multicast(newView, new FLUSH(id));
+			System.out.println("finito di mandare i flush");
 			
 		}
 		
@@ -297,7 +299,7 @@ public class NodeApp {
 				}
 				tempFLUSH.put(mess.ID, mess);
 			}
-			else{
+                        else if(newView != null && onChange){
 			
 				this.newView.get(mess.ID).lastMessage = mess;
 
@@ -314,7 +316,7 @@ public class NodeApp {
 						}
 					}
 					else{
-						System.out.println("il last messaggio da " + key + " era NULL");
+						//System.out.println("il last messaggio da " + key + " era NULL");
 						install = false;
 					}
 				}
@@ -327,6 +329,42 @@ public class NodeApp {
 		}
 		
 		private void onNormalMessage(normalMessage mess){
+                    
+                    //if(!onChange){
+                        genericMessage last = view.get(mess.senderID).lastMessage;
+                        
+                        if(last!= null){
+                            deliver((normalMessage)last);
+                        }
+                        
+                        view.get(mess.senderID).lastMessage = mess;
+                    //}
+                    
+                    
+                    if(id == 0){
+                        if(!onChange){
+                            view.get(mess.senderID).timer = System.currentTimeMillis();
+                            timeCheck(view);
+                        }
+
+                        if(onChange){
+
+                            newView.get(mess.senderID).timer = System.currentTimeMillis();
+                            timeCheck(newView);
+                        }
+                    }
+                    
+                    
+                    if(!onChange && messageID < 400 && mess.senderID == id){
+                            normalMessage m = new normalMessage(id, messageID, IDview);
+                            messageID++;
+
+                            System.out.println("nella onNormalMessage inizio invio messaggio " + m.messageID + " appartenente alla view " + IDview);
+
+                            multicast(view, m);
+                    }
+                    
+                    /*
 			if(!onJoin){
 				//faccio l'handling
 				int idSenderActor = mess.senderID;
@@ -395,7 +433,43 @@ public class NodeApp {
 				//sono in onJoin quindi li scarto cioè termino il metodo senza fare niente
 				System.out.println("sono nuovo e quindi mi e' arrivato un messaggio e lo scarto");
 			}
+                    */
 		}
+                
+                
+                
+                
+                private void onCacheMessage(cacheMessage mess){
+                    if(!onJoin){
+                        
+                        if(view.get(mess.creatorID) != null){
+                            
+                        
+                            normalMessage last = (normalMessage)view.get(mess.creatorID).lastMessage;
+                            
+                            if(last != null){
+                                if(mess.messageID > last.messageID){
+                                    deliver(last);
+                                    view.get(mess.creatorID).lastMessage = new normalMessage(mess.creatorID, mess.messageID, mess.IDview);
+
+                                }
+                            }
+                        }
+                        if(id == 0){
+                            if(onChange){
+                                
+                                newView.get(mess.newsenderID).timer = System.currentTimeMillis();
+                                timeCheck(newView);
+
+                            }else{
+                                view.get(mess.newsenderID).timer = System.currentTimeMillis();
+                                timeCheck(view);
+                            }
+                        }
+                    
+                    }
+                    
+                }
 				
 		private void installView(){
 			//pulisco la nuova view dai messaggi di FLUSH salvati
@@ -404,6 +478,16 @@ public class NodeApp {
 				newView.get(key).timer = 0;
 			}
 			
+                        //quando installo la view posso tranquillamente fare il delivery di tutti i messaggi inerenti 
+                        //alla vecchia view che ho ancora salvato in memoria
+                        if(!onJoin){
+                            for(int key : view.keySet()){
+                                if(view.get(key).lastMessage != null){
+                                    deliver((normalMessage)view.get(key).lastMessage);
+                                }
+                            }
+                        }
+                        
 			this.view = this.newView;
 			this.newView = null;
 			
@@ -536,6 +620,7 @@ public class NodeApp {
 					.match(changeView.class, this::onChangeView)
 					.match(FLUSH.class, this::onFLUSH)
 					.match(normalMessage.class, this::onNormalMessage)
+                                        .match(cacheMessage.class, this::onCacheMessage)
 					.build();
 		}
 	}
