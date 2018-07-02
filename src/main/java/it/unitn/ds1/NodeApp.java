@@ -78,6 +78,23 @@ public class NodeApp {
 		}
 	}
 	
+	public static class cacheMessage extends genericMessage implements Serializable{
+                //il senderid e l'id chi chi invia effettivamente il messaggii
+                int newsenderID;
+                
+                //il creatorId invece e l'id di chi ha creato il messaggio che sta venendo mandato in forma di cache
+                int creatorID;
+		int messageID;
+		int IDview;
+
+                public cacheMessage(int newsenderID, int creatorID, int messageID, int IDview) {
+                    this.newsenderID = newsenderID;
+                    this.creatorID = creatorID;
+                    this.messageID = messageID;
+                    this.IDview = IDview;
+                }
+        }
+	
 	public static class normalMessage extends genericMessage implements Serializable{
 		//id di chi lo manda
 		int senderID;
@@ -228,10 +245,16 @@ public class NodeApp {
 				
 				for(int key : view.keySet()){
 					if(view.get(key).lastMessage != null){
-						System.out.println("inizio invio messaggio " + ((normalMessage)view.get(key).lastMessage).messageID +
-								" inviato dal peer " + ((normalMessage)view.get(key).lastMessage).senderID + 
-								" appartenente alla view " + ((normalMessage)view.get(key).lastMessage).IDview);
-						multicast(newView, view.get(key).lastMessage);
+                                            
+                                                normalMessage last = (normalMessage)view.get(key).lastMessage;
+                                                
+						System.out.println("inizio invio messaggio " + last.messageID +
+								" inviato dal peer " + last.senderID + 
+								" appartenente alla view " + last.IDview);
+                                                
+                                                cacheMessage c = new cacheMessage(id, last.senderID, last.messageID, last.IDview);
+                                                
+						multicast(newView, c);
 						numMessaggi++;
 					}
 				}
