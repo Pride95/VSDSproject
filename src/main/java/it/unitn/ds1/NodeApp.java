@@ -15,6 +15,8 @@ import akka.actor.Cancellable;
 import scala.concurrent.duration.Duration;
 import com.typesafe.config.ConfigFactory;
 import com.typesafe.config.Config;
+import java.util.LinkedList;
+import java.util.Queue;
 import java.util.Random;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -110,8 +112,16 @@ public class NodeApp {
 		}
 	}
 	
-	
-	public static class heart extends genericMessage implements Serializable{}
+	//questo messaggio se lo manda il cordinatore a se stesso cosi rimane sveglio 
+	//per controllare sempre i timers.
+	public static class heart extends genericMessage implements Serializable{
+		int idSender;
+
+		public heart(int id) {
+			this.idSender = id;
+		}
+		
+	}
 
 	
 	
@@ -135,7 +145,8 @@ public class NodeApp {
 		
 		private Map<Integer, genericMessage> tempFLUSH = new HashMap<>();
 		
-		
+		private Queue<genericMessage> codaMessaggi = new LinkedList<>();
+				
 		private boolean onJoin = false;
 		private boolean onChange = false;
 		
@@ -180,6 +191,7 @@ public class NodeApp {
 				System.out.println("sono il Coordinator");
 				view.put(id, new actorData(getSelf(), null, 0));
 				System.out.println("e questa e' la view: " + view.toString() );
+				getSelf().tell(new heart(id), getSelf());
 				
 			}
 		}
@@ -273,6 +285,12 @@ public class NodeApp {
 				System.out.println("sono stati inviati " + numMessaggi + " messaggi di cache ");
 				System.out.println("FINE CACHE");
 				
+				if(id == 0){
+					for(int key : newView.keySet()){
+						newView.get(key).timer = System.currentTimeMillis();
+					}
+				}
+				
 			}
 			else{
 				System.out.println("sono nuovo e devo mandare solo i FLUSH");
@@ -291,7 +309,19 @@ public class NodeApp {
 			}
 			System.out.println("finito di mandare i flush");
 			
+			if(onJoin){
+				System.out.println("sono nuovo e comincio gli heartbit");
+				newView.get(0).ref.tell(new heart(id), getSelf());
+				getSelf().tell(new heart(id), getSelf());
+			}
+			
 		}
+		
+		
+		
+		
+		
+		
 		
 		private void onFLUSH (FLUSH mess){
 			
@@ -343,106 +373,51 @@ public class NodeApp {
 			System.out.println("arrivato messaggio da : " + mess.senderID + " partito nella view " + mess.IDview + 
 					" sono nella view " + IDview + " con prossima view " + newIDview);
 			
-			genericMessage last = view.get(mess.senderID).lastMessage;
+			//faccio lo stesso controllo che se per caso mi arriva un messaggio da un peer 
+			//dichiarato morto per sbaglio lo ignoro
 			
-			if(last!= null){
-				deliver((normalMessage)last);
-			}
-			
-			view.get(mess.senderID).lastMessage = mess;
-			
-			if(id == 0){
-				if(!onChange){
-					view.get(mess.senderID).timer = System.currentTimeMillis();
-					timeCheck(view);
+			if(!onChange){
+				genericMessage last = view.get(mess.senderID).lastMessage;
+
+				if(last!= null){
+					deliver((normalMessage)last);
 				}
 
-				if(onChange){
-					newView.get(mess.senderID).timer = System.currentTimeMillis();
-					timeCheck(newView);
-				}
-			}
+				view.get(mess.senderID).lastMessage = mess;
 
+				/*if(id == 0){
+					if(!onChange){
+						view.get(mess.senderID).timer = System.currentTimeMillis();
+						timeCheck(view);
+					}
+
+					if(onChange){
+						newView.get(mess.senderID).timer = System.currentTimeMillis();
+						timeCheck(newView);
+					}
+				}*/
+			}
+			else{
+				
+				if(codaMessaggi == null){
+					codaMessaggi = new LinkedList<>();
+				}
+				
+				System.out.println("e' arrivato un messaggio durante la change view da : " + mess.messageID + " e lo metto in coda");
+				codaMessaggi.add(mess);
+				
+			}
 
 			if(!onChange && messageID < 400 && mess.senderID == id){
 				normalMessage m = new normalMessage(id, messageID, IDview);
 				messageID++;
-
+				
 				System.out.println("nella onNormalMessage inizio invio messaggio " + m.messageID + " appartenente alla view " + IDview);
 
 				multicast(view, m);
 			}
-                    
-            /*
-			if(!onJoin){
-				//faccio l'handling
-				int idSenderActor = mess.senderID;
-				int idMessage = mess.messageID;
-				normalMessage last = (normalMessage) view.get(idSenderActor).lastMessage;
-				
-				//sono il coordinator
-				if(id == 0){
-					if(!onChange){
-						//non si sta cambiando la view quindi lavoro sulla vecchia view
-						view.get(idSenderActor).timer = System.currentTimeMillis();
-						timeCheck(view);
-					}
-					else{
-						//si sta cambiando la view quindi questi sono messaggi di cache
-						//quindi lavoro sulla newView
-						
-						ActorRef f = getSender();
-						
-						System.out.println("Arrivato messaggio di cache inerente al peer " + idSenderActor + "  ");
-						
-						int realSender = getKeyFromValue(newView, f);
-						
-						actorData acData = newView.get(realSender);
-						if( acData != null){
-							newView.get(realSender).timer = System.currentTimeMillis();
-						}
-						else{
-							//in questo branch non puo entrare 
-							System.out.println("c'e' un errore da controllare alla riga 324");
-						}
-						timeCheck(newView);
-					}
-				}
-				
-				if(last != null){
-					if(last.messageID < idMessage){
-						//ne è arrivato uno più recente adesso li cambio
-						view.get(idSenderActor).lastMessage = mess;
-						deliver(mess);
-					}
-					else{
-						System.out.println("Ho ricevuto il messaggio: " + idMessage + " da " + idSenderActor + " vecchio, lo considero");
-						//non lo considero perche o è uguale o è più vecchio e quindi ne avro di sicuro fatto il delivery
-					}
-				}
-				else{
-					view.get(idSenderActor).lastMessage = mess;
-					deliver(mess);
-				}
-				
-				System.out.println("la view nel in questo momento e' : " + printView(view));
-				
-				//metto un controllo cosi ne invia solo un numero fisso
-				if(!onChange && idSenderActor == id && messageID < 400){
-					normalMessage m = new normalMessage(id, messageID, IDview);
-					messageID++;
-					
-					System.out.println("nella onNormalMessage inizio invio messaggio " + m.messageID + " appartenente alla view " + IDview);
-					
-					multicast(view, m);
-				}
-				
-			}
-			else{
-				//sono in onJoin quindi li scarto cioè termino il metodo senza fare niente
-				System.out.println("sono nuovo e quindi mi e' arrivato un messaggio e lo scarto");
-			}
-                    */
+                 
+            
 		}
 		
 		private void onCacheMessage(cacheMessage mess){
@@ -468,6 +443,7 @@ public class NodeApp {
 						}
 					}
 				}
+				/*
 				if(id == 0){
 					if(onChange){
 						newView.get(mess.newsenderID).timer = System.currentTimeMillis();
@@ -478,9 +454,52 @@ public class NodeApp {
 						timeCheck(view);
 					}
 				}
+				*/
 
 			}
 
+		}
+		
+		
+		private void onHeart(heart m){
+			
+			
+			if(id == 0){
+				
+				//eseguire i check per far si che se uno è dichiarato morto per sbaglio
+				//non faccia andare tutto in null pointer
+				System.out.println("arrivato heartbit da " + m.idSender);
+				if(onChange){
+					newView.get(m.idSender).timer = System.currentTimeMillis();
+					timeCheck(newView);
+				}
+				else{
+					view.get(m.idSender).timer = System.currentTimeMillis();
+					timeCheck(view);
+				}
+			}
+			
+			
+			if(m.idSender == id){
+				try {
+					Thread.sleep(500);
+				} catch (InterruptedException ex) {
+					Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
+				}
+
+				System.out.println("rinivio heartbit");
+				if(newView != null){
+					newView.get(0).ref.tell(new heart(id), getSelf());
+				}
+				else if(view != null){
+					view.get(0).ref.tell(new heart(id), getSelf());
+				}
+
+				if(id != 0){
+					getSelf().tell(new heart(id), getSelf());
+				}
+			}
+			
 		}
 				
 		private void installView(){
@@ -505,6 +524,31 @@ public class NodeApp {
 						deliver((normalMessage)view.get(key).lastMessage);
 					}
 				}
+				
+				if(codaMessaggi != null){
+					while(!codaMessaggi.isEmpty()){
+						normalMessage m = (normalMessage) codaMessaggi.poll();
+						
+						System.out.println("dalla coda estraggo il mess : " + m.messageID + " inviato da : " + m.senderID);
+						
+						if(view.containsKey(m.senderID)){
+							
+							if(view.get(m.senderID).lastMessage != null){
+								normalMessage last = (normalMessage) view.get(m.senderID).lastMessage;
+								
+								if(last.messageID < m.messageID){
+									System.out.println("il messaggio estratto è corretto e quindi lo delivero");
+									deliver(m);
+								}
+								
+							}
+														
+						}
+						
+					}
+					codaMessaggi = null;
+				}
+				
 			}
             
 			System.out.println("<"+id+"> INSTALL VIEW " + newIDview + "--" + printView(newView));
@@ -532,6 +576,8 @@ public class NodeApp {
 		
 		private void timeCheck(Map<Integer, actorData> currentview){
 			
+			//inserire lista dei peer eliminati cosi da  non eliminarli di nuovo
+			
 			long current = System.currentTimeMillis();
 			
 			int timeout = 4000; //sono millisecond
@@ -541,10 +587,14 @@ public class NodeApp {
 			
 			boolean crash = false;
 			
+			boolean sendnewview = true;
+			
 			for(int key : currentview.keySet()){
-				if(currentview.get(key).timer != 0 ){
+				if(currentview.get(key).timer != 0 && key != 0 ){
 					long difference = current - currentview.get(key).timer;
 					
+					
+					/*
 					boolean wasFLUSH = false;
 					
 					genericMessage last = currentview.get(key).lastMessage;
@@ -555,37 +605,60 @@ public class NodeApp {
 						}
 					}
 					
-					if(difference > timeout && !wasFLUSH){
+					*/
+					
+					if(difference > timeout){
 						crash = true;
 						System.out.println("CRASH !!!!!! il peer " + key + " non risponde da " + difference);
 						tempView.remove(key);
 					}
 				}
 				else{
+					//qui se il timer è pari a 0 allora lo setto al corrente timer
 					currentview.get(key).timer = current;
 				}
 				
 			}
 			
 			if(crash){
-				//da cambiare, devo controllare se sono o meno nella situazione che sto cambiando view
-				//troppo semplicistica
-				newIDview = IDview+1;
-				newView = new HashMap<>();
-				newView.putAll(tempView);
-				
-				for (int key : newView.keySet()){
-					newView.get(key).lastMessage = null;
-					newView.get(key).timer = 0;
+				if(onChange){
+					newIDview = newIDview+1;
+				}else{
+					newIDview = IDview+1;
 				}
 				
-				System.out.println("CRASH individuato e la nuova view e' : " + printView(newView));
-				
-				for (int key : newView.keySet()){
-					System.out.println("mando il messaggio di changeview a: " + key + " --- " + newView.get(key).ref.toString());
-					newView.get(key).ref.tell(new changeView(newIDview, newView), getSelf());
+				if(newView != null){
+					//faccio il controllo cosi da non duplicare icahnge view
+					
+					boolean firstcheck = newView.keySet().containsAll(tempView.keySet());
+					boolean secondcheck = tempView.keySet().containsAll(newView.keySet());
+					
+					if(firstcheck && secondcheck){
+						//sono uguali e quindi non replico il messaggio di change
+						sendnewview = false;
+						System.out.println("stavo per mandare una nuova change view duplicata ma non la invio");
+					}
+					
 				}
 				
+				if(sendnewview){
+					
+					newView = new HashMap<>();
+					newView.putAll(tempView);
+
+					for (int key : newView.keySet()){
+						newView.get(key).lastMessage = null;
+						newView.get(key).timer = 0;
+					}
+
+
+					System.out.println("CRASH individuato e la nuova view e' : " + printView(newView));
+
+					for (int key : newView.keySet()){
+						System.out.println("mando il messaggio di changeview a: " + key + " --- " + newView.get(key).ref.toString());
+						newView.get(key).ref.tell(new changeView(newIDview, newView), getSelf());
+					}
+				}
 			}
 		}
 		
@@ -648,7 +721,8 @@ public class NodeApp {
 					.match(changeView.class, this::onChangeView)
 					.match(FLUSH.class, this::onFLUSH)
 					.match(normalMessage.class, this::onNormalMessage)
-                                        .match(cacheMessage.class, this::onCacheMessage)
+                    .match(cacheMessage.class, this::onCacheMessage)
+					.match(heart.class, this::onHeart)
 					.build();
 		}
 	}
