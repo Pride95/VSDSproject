@@ -109,6 +109,9 @@ public class NodeApp {
 			this.IDview = v;
 		}
 	}
+	
+	
+	public static class heart extends genericMessage implements Serializable{}
 
 	
 	
@@ -159,6 +162,7 @@ public class NodeApp {
 		}
 		
 		public void preStart() {
+			System.out.println("AVVIO SISTEMA");
 			if (this.remotePath != null) {
 				//sono qui solo se non sono il coordinator e sono appena entrato
 				
@@ -183,12 +187,22 @@ public class NodeApp {
 		private void onJoinRequest (joinRequest mess){
 			System.out.println("mi e' arrivata una richiesta da: " + mess.ref);
 			
-			
-			
-			newIDview = IDview+1;
-			newView = new HashMap<>();
-			newView.putAll(view);
-			newView.put(IDactor, new actorData(mess.ref, null, 0));
+			//controllo che sto cambiando gia view, se è cosi
+			//estendo la nuova view e non la vecchia
+			if(newView != null){
+				System.out.println("sta avvenendo una entrata mentre stiamo cambiando view, quindi estendo la nuova view");
+				Map<Integer, actorData> tempview = new HashMap<>();
+				newIDview = newIDview+1;
+				tempview.putAll(newView);
+				tempview.put(IDactor, new actorData(mess.ref, null, 0));
+				newView = tempview;
+			}
+			else{
+				newIDview = IDview+1;
+				newView = new HashMap<>();
+				newView.putAll(view);
+				newView.put(IDactor, new actorData(mess.ref, null, 0));
+			}
 			
 			//pulire tutti i last message perche non li devo mandare in giro.
 			
@@ -210,9 +224,6 @@ public class NodeApp {
 			}
 			
 			IDactor++;
-			
-			
-			
 		}
 		
 		private void onJoinResponse(joinResponse mess){
@@ -260,6 +271,7 @@ public class NodeApp {
 				}
 				
 				System.out.println("sono stati inviati " + numMessaggi + " messaggi di cache ");
+				System.out.println("FINE CACHE");
 				
 			}
 			else{
@@ -267,7 +279,16 @@ public class NodeApp {
 			}
 			
 			System.out.println("comincio a mandare i messaggi di flush");
-			multicast(newView, new FLUSH(id, IDview));
+			//problema se sono nuovo è possibile che mando in giro messaggi che arrivano da una view 0
+			//il che mi puo portare problemi quando devo salvare i flush nei flush temporanei
+			//per cui metto che li ho inviari nella view prima di quella nuova
+			if(onJoin){
+				multicast(newView, new FLUSH(id, newIDview - 1));
+			}
+			else{
+				//se invece non sono nuovo non c'è nessun problema
+				multicast(newView, new FLUSH(id, IDview));
+			}
 			System.out.println("finito di mandare i flush");
 			
 		}
@@ -278,7 +299,7 @@ public class NodeApp {
 			
 			if(newView == null && !onChange){
 				System.out.println("mi è arrivato un FLUSH prima che fossi in onChangeView");
-				if (mess.IDview == IDview){
+				if (mess.IDview >= IDview){
 				
 					if(tempFLUSH == null){
 						tempFLUSH = new HashMap<>();
@@ -344,15 +365,15 @@ public class NodeApp {
 
 
 			if(!onChange && messageID < 400 && mess.senderID == id){
-					normalMessage m = new normalMessage(id, messageID, IDview);
-					messageID++;
+				normalMessage m = new normalMessage(id, messageID, IDview);
+				messageID++;
 
-					System.out.println("nella onNormalMessage inizio invio messaggio " + m.messageID + " appartenente alla view " + IDview);
+				System.out.println("nella onNormalMessage inizio invio messaggio " + m.messageID + " appartenente alla view " + IDview);
 
-					multicast(view, m);
+				multicast(view, m);
 			}
                     
-                    /*
+            /*
 			if(!onJoin){
 				//faccio l'handling
 				int idSenderActor = mess.senderID;
@@ -547,6 +568,8 @@ public class NodeApp {
 			}
 			
 			if(crash){
+				//da cambiare, devo controllare se sono o meno nella situazione che sto cambiando view
+				//troppo semplicistica
 				newIDview = IDview+1;
 				newView = new HashMap<>();
 				newView.putAll(tempView);
