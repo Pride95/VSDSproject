@@ -73,8 +73,10 @@ public class NodeApp {
 	
 	public static class FLUSH extends genericMessage implements Serializable{
 		int ID;
-		public FLUSH(int ID) {
+		int IDview;
+		public FLUSH(int ID, int idview) {
 			this.ID = ID;
+			this.IDview = idview;
 		}
 	}
 	
@@ -146,9 +148,6 @@ public class NodeApp {
 		
 		Random rand = new Random();
 		
-
-		
-		
 		/* -- Actor constructor --------------------------------------------------- */
 		public Node(String remotePath) {
 			this.remotePath = remotePath;
@@ -159,8 +158,6 @@ public class NodeApp {
 			return Props.create(Node.class, () -> new Node(remotePath));
 		}
 		
-		
-
 		public void preStart() {
 			if (this.remotePath != null) {
 				//sono qui solo se non sono il coordinator e sono appena entrato
@@ -183,18 +180,17 @@ public class NodeApp {
 			}
 		}
 		
-		
-		
 		private void onJoinRequest (joinRequest mess){
 			System.out.println("mi e' arrivata una richiesta da: " + mess.ref);
+			
+			
+			
 			newIDview = IDview+1;
 			newView = new HashMap<>();
 			newView.putAll(view);
 			newView.put(IDactor, new actorData(mess.ref, null, 0));
 			
 			//pulire tutti i last message perche non li devo mandare in giro.
-			
-			
 			
 			for (int key : newView.keySet()){
 				newView.get(key).lastMessage = null;
@@ -206,7 +202,6 @@ public class NodeApp {
 			mess.ref.tell(new joinResponse(IDactor), getSelf());
 			
 			//ciclo for per mandare a tutti nella nuova view il messaggio di changeview !
-			
 			//mettere questo ciclo in una funzione e sara nominata multicast
 			
 			for (int key : newView.keySet()){
@@ -215,21 +210,22 @@ public class NodeApp {
 			}
 			
 			IDactor++;
+			
+			
+			
 		}
 		
 		private void onJoinResponse(joinResponse mess){
-			
 			this.id = mess.IDactor;
 			System.out.println("mi è arrivata la risposta di join e sono: " + mess.IDactor);
-			
 		}
-		
 		
 		private void onChangeView (changeView mess){
 			this.onChange = true;
 			
 			this.newIDview = mess.newIDView;
 			this.newView = mess.newView;
+			
 			
 			if(tempFLUSH != null){
 				for(int key : tempFLUSH.keySet()){
@@ -249,14 +245,14 @@ public class NodeApp {
 				
 				for(int key : view.keySet()){
 					if(view.get(key).lastMessage != null){
-                                            
-                                                normalMessage last = (normalMessage)view.get(key).lastMessage;
+						
+                        normalMessage last = (normalMessage)view.get(key).lastMessage;
                                                 
 						System.out.println("inizio invio messaggio " + last.messageID +
 								" inviato dal peer " + last.senderID + 
 								" appartenente alla view " + last.IDview);
                                                 
-                                                cacheMessage c = new cacheMessage(id, last.senderID, last.messageID, last.IDview);
+                        cacheMessage c = new cacheMessage(id, last.senderID, last.messageID, last.IDview);
                                                 
 						multicast(newView, c);
 						numMessaggi++;
@@ -267,43 +263,33 @@ public class NodeApp {
 				
 			}
 			else{
-				
 				System.out.println("sono nuovo e devo mandare solo i FLUSH");
 			}
 			
-			/*
-			for (int key : newView.keySet()){
-				//newView.get(key).lastMessage = null;
-				if(newView.get(key).lastMessage != null){
-					System.out.println("il messaggio che e' gia nella view e': " + newView.get(key).lastMessage.toString());
-				}
-				
-				newView.get(key).ref.tell(new FLUSH(id), getSelf());
-				
-				System.out.println("mando il FLUSH a: " + key + " --- " + newView.get(key).ref );
-			}*/
-                        System.out.println("comincio a mandare i messaggi di flush");
-                        multicast(newView, new FLUSH(id));
+			System.out.println("comincio a mandare i messaggi di flush");
+			multicast(newView, new FLUSH(id, IDview));
 			System.out.println("finito di mandare i flush");
 			
 		}
 		
 		private void onFLUSH (FLUSH mess){
 			
-			System.out.println("arrivato un messaggio di FLUSH da: " + mess.ID);
+			System.out.println("arrivato un messaggio di FLUSH da: " + mess.ID + " che e' partito dalla view : " + mess.IDview);
 			
 			if(newView == null && !onChange){
 				System.out.println("mi è arrivato un FLUSH prima che fossi in onChangeView");
-				if(tempFLUSH == null){
-					tempFLUSH = new HashMap<>();
+				if (mess.IDview == IDview){
+				
+					if(tempFLUSH == null){
+						tempFLUSH = new HashMap<>();
+					}
+					tempFLUSH.put(mess.ID, mess);
+					
 				}
-				tempFLUSH.put(mess.ID, mess);
 			}
-                        else if(newView != null && onChange){
+            else if(newView != null && onChange){
 			
 				this.newView.get(mess.ID).lastMessage = mess;
-
-
 				//ciclo su tutti e se tutti sono in flush io installo la view
 
 				boolean install = true;
@@ -326,43 +312,45 @@ public class NodeApp {
 					installView();
 				}
 			}
+			else{
+				
+			}
 		}
 		
 		private void onNormalMessage(normalMessage mess){
-                    
-                    //if(!onChange){
-                        genericMessage last = view.get(mess.senderID).lastMessage;
-                        
-                        if(last!= null){
-                            deliver((normalMessage)last);
-                        }
-                        
-                        view.get(mess.senderID).lastMessage = mess;
-                    //}
-                    
-                    
-                    if(id == 0){
-                        if(!onChange){
-                            view.get(mess.senderID).timer = System.currentTimeMillis();
-                            timeCheck(view);
-                        }
+            
+			System.out.println("arrivato messaggio da : " + mess.senderID + " partito nella view " + mess.IDview + 
+					" sono nella view " + IDview + " con prossima view " + newIDview);
+			
+			genericMessage last = view.get(mess.senderID).lastMessage;
+			
+			if(last!= null){
+				deliver((normalMessage)last);
+			}
+			
+			view.get(mess.senderID).lastMessage = mess;
+			
+			if(id == 0){
+				if(!onChange){
+					view.get(mess.senderID).timer = System.currentTimeMillis();
+					timeCheck(view);
+				}
 
-                        if(onChange){
+				if(onChange){
+					newView.get(mess.senderID).timer = System.currentTimeMillis();
+					timeCheck(newView);
+				}
+			}
 
-                            newView.get(mess.senderID).timer = System.currentTimeMillis();
-                            timeCheck(newView);
-                        }
-                    }
-                    
-                    
-                    if(!onChange && messageID < 400 && mess.senderID == id){
-                            normalMessage m = new normalMessage(id, messageID, IDview);
-                            messageID++;
 
-                            System.out.println("nella onNormalMessage inizio invio messaggio " + m.messageID + " appartenente alla view " + IDview);
+			if(!onChange && messageID < 400 && mess.senderID == id){
+					normalMessage m = new normalMessage(id, messageID, IDview);
+					messageID++;
 
-                            multicast(view, m);
-                    }
+					System.out.println("nella onNormalMessage inizio invio messaggio " + m.messageID + " appartenente alla view " + IDview);
+
+					multicast(view, m);
+			}
                     
                     /*
 			if(!onJoin){
@@ -435,59 +423,71 @@ public class NodeApp {
 			}
                     */
 		}
-                
-                
-                
-                
-                private void onCacheMessage(cacheMessage mess){
-                    if(!onJoin){
-                        
-                        if(view.get(mess.creatorID) != null){
-                            
-                        
-                            normalMessage last = (normalMessage)view.get(mess.creatorID).lastMessage;
-                            
-                            if(last != null){
-                                if(mess.messageID > last.messageID){
-                                    deliver(last);
-                                    view.get(mess.creatorID).lastMessage = new normalMessage(mess.creatorID, mess.messageID, mess.IDview);
+		
+		private void onCacheMessage(cacheMessage mess){
+			
+			if(!onJoin){
+				System.out.println("arrivato cache message da " + mess.newsenderID + " inerente al peer " + mess.creatorID 
+						+ " partito dalla view " + mess.IDview);
+				
+				if(view.get(mess.creatorID) != null){
 
-                                }
-                            }
-                        }
-                        if(id == 0){
-                            if(onChange){
-                                
-                                newView.get(mess.newsenderID).timer = System.currentTimeMillis();
-                                timeCheck(newView);
 
-                            }else{
-                                view.get(mess.newsenderID).timer = System.currentTimeMillis();
-                                timeCheck(view);
-                            }
-                        }
-                    
-                    }
-                    
-                }
+					normalMessage last = (normalMessage)view.get(mess.creatorID).lastMessage;
+
+					if(last != null){
+						if(mess.messageID > last.messageID){
+							System.out.println("messaggio cache arrivato e' un nuovo messaggio quindi mi è utile");
+							deliver(last);
+							view.get(mess.creatorID).lastMessage = new normalMessage(mess.creatorID, mess.messageID, mess.IDview);
+						}
+						else{
+							System.out.println("il messaggio di cache non mi e' utile, last messagge id: " + last.messageID 
+									+ " cache mess id: " + mess.messageID);
+						}
+					}
+				}
+				if(id == 0){
+					if(onChange){
+						newView.get(mess.newsenderID).timer = System.currentTimeMillis();
+						timeCheck(newView);
+
+					}else{
+						view.get(mess.newsenderID).timer = System.currentTimeMillis();
+						timeCheck(view);
+					}
+				}
+
+			}
+
+		}
 				
 		private void installView(){
 			//pulisco la nuova view dai messaggi di FLUSH salvati
 			for (int key : newView.keySet()){
 				newView.get(key).lastMessage = null;
-				newView.get(key).timer = 0;
+				//newView.get(key).timer = 0;
+				//la modifico che inserisco il timer di quando installo
+				if(id == 0) {
+					newView.get(key).timer = System.currentTimeMillis();
+				}
+				else{
+					newView.get(key).timer = 0;
+				}
 			}
 			
-                        //quando installo la view posso tranquillamente fare il delivery di tutti i messaggi inerenti 
-                        //alla vecchia view che ho ancora salvato in memoria
-                        if(!onJoin){
-                            for(int key : view.keySet()){
-                                if(view.get(key).lastMessage != null){
-                                    deliver((normalMessage)view.get(key).lastMessage);
-                                }
-                            }
-                        }
-                        
+			//quando installo la view posso tranquillamente fare il delivery di tutti i messaggi inerenti 
+			//alla vecchia view che ho ancora salvato in memoria
+			if(!onJoin){
+				for(int key : view.keySet()){
+					if(view.get(key).lastMessage != null){
+						deliver((normalMessage)view.get(key).lastMessage);
+					}
+				}
+			}
+            
+			System.out.println("<"+id+"> INSTALL VIEW " + newIDview + "--" + printView(newView));
+			
 			this.view = this.newView;
 			this.newView = null;
 			
@@ -597,11 +597,16 @@ public class NodeApp {
 		}
 		
 		private void deliver(normalMessage m){
-			System.out.println("Deliver nuovo messaggio con id : " + m.messageID + " mandato da: " + m.senderID + " inviata nella view : " + m.IDview + " siamo nella view " + IDview);
+			System.out.println("<"+id+"> Deliver nuovo messaggio con id : " + m.messageID + " mandato da: " 
+					+ m.senderID + " inviata nella view : " + m.IDview + " siamo nella view " + IDview);
 		}
 		
 		private void multicast(Map<Integer, actorData> v, genericMessage m){
 			int timeSleep = rand.nextInt(1000) + 1000 ;
+			if(m instanceof normalMessage){
+				System.out.println("<"+id+"> SEND MULTICAST " + ((normalMessage)m).messageID 
+						+ " NELLA VIEW " + ((normalMessage)m).IDview);
+			}
 			try {
 				Thread.sleep(timeSleep);
 			} catch (InterruptedException ex) {
