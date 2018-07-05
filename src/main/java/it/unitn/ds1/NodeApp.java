@@ -122,6 +122,10 @@ public class NodeApp {
 		}
 		
 	}
+	
+	public static class isDead extends genericMessage implements Serializable {
+		
+	}
 
 	
 	
@@ -340,31 +344,44 @@ public class NodeApp {
 			}
             else if(newView != null && onChange){
 			
-				this.newView.get(mess.ID).lastMessage = mess;
-				//ciclo su tutti e se tutti sono in flush io installo la view
+				if(newView.containsKey(mess.ID)){
+					this.newView.get(mess.ID).lastMessage = mess;
+					//ciclo su tutti e se tutti sono in flush io installo la view
 
-				boolean install = true;
-				for (int key : newView.keySet()){
+					boolean install = true;
+					for (int key : newView.keySet()){
 
-					if (this.newView.get(key).lastMessage != null ){
-						//System.out.println("vedo il " + key + " con il messaggio : " + this.newView.get(key).lastMessage.toString());
-						if (! (this.newView.get(key).lastMessage instanceof FLUSH)){
+						if (this.newView.get(key).lastMessage != null ){
+							//System.out.println("vedo il " + key + " con il messaggio : " + this.newView.get(key).lastMessage.toString());
+							if (! (this.newView.get(key).lastMessage instanceof FLUSH)){
+								install = false;
+							}
+						}
+						else{
+							//System.out.println("il last messaggio da " + key + " era NULL");
 							install = false;
 						}
 					}
-					else{
-						//System.out.println("il last messaggio da " + key + " era NULL");
-						install = false;
+
+					if(install){
+						System.out.println("view stabile ora installo");
+						installView();
 					}
 				}
-
-				if(install){
-					System.out.println("view stabile ora installo");
-					installView();
+				else{
+					//siamo qui perche ci è arrivato un FLUSH da un peer non presente nella newview
+					//quindi probabilmente considerato morto per errore
+					//ignoriamo il FLUSH e mandiamo il messaggio di terminazione
+					
+					//qui semplicemente ignoriamo i messasggi
+					//tanto gli abbiamo detto di morire gia prima nel timecheck
+					
+					System.out.println("!!!ignorato un messaggio di FLUSH proveniente da " + mess.ID + " inviato nella view " 
+							+ mess.IDview );
 				}
 			}
 			else{
-				
+				System.out.println("!!!sono arrivato in un punto del protocollo morto controllo!!!!");
 			}
 		}
 		
@@ -377,14 +394,24 @@ public class NodeApp {
 			//dichiarato morto per sbaglio lo ignoro
 			
 			if(!onChange){
-				genericMessage last = view.get(mess.senderID).lastMessage;
+				
+				if(view.containsKey(mess.senderID)){
+					genericMessage last = view.get(mess.senderID).lastMessage;
 
-				if(last!= null){
-					deliver((normalMessage)last);
+					if(last!= null){
+						deliver((normalMessage)last);
+					}
+
+					view.get(mess.senderID).lastMessage = mess;
 				}
-
-				view.get(mess.senderID).lastMessage = mess;
-
+				else{
+					//è arrivato un messaggio da un peer che non è presente nella view
+					//lo ignoro perche gli è stato inviato il messaggio di morte gia prima
+					System.out.println("!!!ingorato messaggio proveniente da " + mess.senderID + " mandato nella view " 
+							+ mess.IDview + " siamo nella view " + IDview);
+				}
+				
+				
 				/*if(id == 0){
 					if(!onChange){
 						view.get(mess.senderID).timer = System.currentTimeMillis();
@@ -409,6 +436,16 @@ public class NodeApp {
 			}
 
 			if(!onChange && messageID < 400 && mess.senderID == id){
+				
+				if(id == 1 && messageID == 20){
+					System.out.println("fingo di morire");
+					try {
+						Thread.sleep(10000);
+					} catch (InterruptedException ex) {
+						Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
+					}
+				}
+				
 				normalMessage m = new normalMessage(id, messageID, IDview);
 				messageID++;
 				
@@ -501,6 +538,35 @@ public class NodeApp {
 			}
 			
 		}
+		
+		private void onDeadMessagge(isDead m){
+			//fare qualcosa per morire
+			
+			System.out.println("!!!!arrivato messaggio di morte resetto tutto e mi riavvio");
+			
+			if(id != 0){
+				newIDview = 0;
+				newView = null;
+				view = new HashMap<>();
+				IDview = 0;
+				tempFLUSH = null;
+				codaMessaggi = null;
+				onJoin = false;
+				onChange = false;
+				
+				messageID = 1;
+				
+				try {
+					Thread.sleep(15000);
+				} catch (InterruptedException ex) {
+					Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
+				}
+				
+				System.out.println("--------------inizio riavvio---------------");
+				
+				preStart();
+			}
+		}
 				
 		private void installView(){
 			//pulisco la nuova view dai messaggi di FLUSH salvati
@@ -580,7 +646,9 @@ public class NodeApp {
 			
 			long current = System.currentTimeMillis();
 			
-			int timeout = 4000; //sono millisecond
+			int timeout = 6000; //sono millisecond
+								//abbiamo incrementato il timer per il problema che grazie agli
+								//heartbit il tutto diventa più lento.
 			
 			Map<Integer, actorData> tempView = new HashMap<>();
 			tempView.putAll(currentview);
@@ -594,22 +662,15 @@ public class NodeApp {
 					long difference = current - currentview.get(key).timer;
 					
 					
-					/*
-					boolean wasFLUSH = false;
-					
-					genericMessage last = currentview.get(key).lastMessage;
-					
-					if(last != null){
-						if(last instanceof FLUSH){
-							wasFLUSH = true;
-						}
-					}
-					
-					*/
-					
 					if(difference > timeout){
 						crash = true;
 						System.out.println("CRASH !!!!!! il peer " + key + " non risponde da " + difference);
+						
+						//qui il peer lo dichiaramo morto per cui gli inviamo il messaggio di morte per essere sicuri che 
+						//forse lo abbiamo dichiarato morto per sbaglio
+						
+						currentview.get(key).ref.tell(new isDead(), getSelf());
+						
 						tempView.remove(key);
 					}
 				}
@@ -713,6 +774,8 @@ public class NodeApp {
 			}
 		}
 
+		
+		
 		@Override
 		public Receive createReceive() {
 			return receiveBuilder()
@@ -723,6 +786,7 @@ public class NodeApp {
 					.match(normalMessage.class, this::onNormalMessage)
                     .match(cacheMessage.class, this::onCacheMessage)
 					.match(heart.class, this::onHeart)
+					.match(isDead.class, this::onDeadMessagge)
 					.build();
 		}
 	}
