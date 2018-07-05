@@ -12,6 +12,7 @@ import akka.actor.AbstractActor;
 import akka.actor.ActorSystem;
 import akka.actor.Props;
 import akka.actor.Cancellable;
+import akka.actor.PoisonPill;
 import scala.concurrent.duration.Duration;
 import com.typesafe.config.ConfigFactory;
 import com.typesafe.config.Config;
@@ -507,12 +508,25 @@ public class NodeApp {
 				//non faccia andare tutto in null pointer
 				System.out.println("arrivato heartbit da " + m.idSender);
 				if(onChange){
-					newView.get(m.idSender).timer = System.currentTimeMillis();
-					timeCheck(newView);
+					if(newView.containsKey(m.idSender)){
+						newView.get(m.idSender).timer = System.currentTimeMillis();
+						timeCheck(newView);
+					}
+					else{
+						//arrivato un heartbeat da un peer considerato morto
+						System.out.println("arrivato un heartbeat da un peer considerato morto");
+						
+					}
 				}
 				else{
-					view.get(m.idSender).timer = System.currentTimeMillis();
-					timeCheck(view);
+					if(view.containsKey(m.idSender)){
+						view.get(m.idSender).timer = System.currentTimeMillis();
+						timeCheck(view);
+					}
+					else{
+						//arrivato un heartbeat da un peer considerato morto
+						System.out.println("arrivato un heartbeat da un peer considerato morto");
+					}
 				}
 			}
 			
@@ -564,6 +578,8 @@ public class NodeApp {
 				
 				System.out.println("--------------inizio riavvio---------------");
 				
+				
+				
 				preStart();
 			}
 		}
@@ -609,6 +625,9 @@ public class NodeApp {
 								
 							}
 														
+						}
+						else{
+							
 						}
 						
 					}
@@ -669,7 +688,8 @@ public class NodeApp {
 						//qui il peer lo dichiaramo morto per cui gli inviamo il messaggio di morte per essere sicuri che 
 						//forse lo abbiamo dichiarato morto per sbaglio
 						
-						currentview.get(key).ref.tell(new isDead(), getSelf());
+						currentview.get(key).ref.tell(PoisonPill.getInstance(), getSelf());
+						//currentview.get(key).ref.tell(new isDead(), getSelf());
 						
 						tempView.remove(key);
 					}
