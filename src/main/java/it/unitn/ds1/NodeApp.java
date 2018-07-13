@@ -16,6 +16,9 @@ import akka.actor.PoisonPill;
 import scala.concurrent.duration.Duration;
 import com.typesafe.config.ConfigFactory;
 import com.typesafe.config.Config;
+import java.io.BufferedWriter;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.util.LinkedList;
 import java.util.Queue;
 import java.util.Random;
@@ -45,8 +48,10 @@ public class NodeApp {
 	
 	public static class joinRequest extends genericMessage implements Serializable{
 		ActorRef ref;
-		public joinRequest(ActorRef ref){
+		int idPeer;
+		public joinRequest(ActorRef ref, int id){
 			this.ref = ref;
+			this.idPeer = id;
 		}
 	}
 	
@@ -77,27 +82,29 @@ public class NodeApp {
 	public static class FLUSH extends genericMessage implements Serializable{
 		int ID;
 		int IDview;
-		public FLUSH(int ID, int idview) {
+		int IDnewView;
+		public FLUSH(int ID, int idview, int IDnewView) {
 			this.ID = ID;
 			this.IDview = idview;
+			this.IDnewView = IDnewView;
 		}
 	}
 	
 	public static class cacheMessage extends genericMessage implements Serializable{
-                //il senderid e l'id chi chi invia effettivamente il messaggii
-                int newsenderID;
-                
-                //il creatorId invece e l'id di chi ha creato il messaggio che sta venendo mandato in forma di cache
-                int creatorID;
+		//il senderid e l'id chi chi invia effettivamente il messaggii
+		int newsenderID;
+
+		//il creatorId invece e l'id di chi ha creato il messaggio che sta venendo mandato in forma di cache
+		int creatorID;
 		int messageID;
 		int IDview;
 
-                public cacheMessage(int newsenderID, int creatorID, int messageID, int IDview) {
-                    this.newsenderID = newsenderID;
-                    this.creatorID = creatorID;
-                    this.messageID = messageID;
-                    this.IDview = IDview;
-                }
+		public cacheMessage(int newsenderID, int creatorID, int messageID, int IDview) {
+			this.newsenderID = newsenderID;
+			this.creatorID = creatorID;
+			this.messageID = messageID;
+			this.IDview = IDview;
+		}
         }
 	
 	public static class normalMessage extends genericMessage implements Serializable{
@@ -150,15 +157,23 @@ public class NodeApp {
 		
 		private String remotePath = null;
 		
+		private String filename = "";
+		private BufferedWriter out;
+		
 		//questo è il proprio id di ciascun nodo
 		private int id;
+		private int privateId;
 		
 		//questo è l'id assegnato agli attori che si uniscono ed è uso esclusivo del coordinator
 		private int IDactor = 1;
 		
 		private int messageID = 0;
+		private int maxMessagge = 20;
 		
 		Random rand = new Random();
+		
+		private Queue<ActorRef> toJoinPeer = new  LinkedList<>();
+		
 		
 		
 		private boolean crashNormal = false;
@@ -167,18 +182,29 @@ public class NodeApp {
 		private boolean crashChange = false;
 		private boolean isCrash = false;
 		
+		private boolean joinOnJoin = false;
+		private boolean joinOnJoinexetuted = false;
+		
+		private boolean joinOnChange = true;
+		private boolean joinOnChangeExecuted = false;
+		
+		private boolean fileReset = false;
+		
+		private boolean isFinish = false;
+		
 		/* -- Actor constructor --------------------------------------------------- */
-		public Node(String remotePath) {
+		public Node(String remotePath, int privateID) {
 			this.remotePath = remotePath;
-			
+			this.privateId = privateID;
 		}
 
 		static public Props props(int id, String remotePath) {
-			return Props.create(Node.class, () -> new Node(remotePath));
+			return Props.create(Node.class, () -> new Node(remotePath, id));
 		}
 		
+		@Override
 		public void preStart() {
-			System.out.println("AVVIO SISTEMA");
+			System.out.println("AVVIO PEER");
 			if (this.remotePath != null) {
 				//sono qui solo se non sono il coordinator e sono appena entrato
 				
@@ -186,8 +212,9 @@ public class NodeApp {
 				onJoin = true;
 				//invio la richiesta di entrare
 				System.out.println("cerco di entrare e chiedo a " + remotePath);
-				getContext().actorSelection(remotePath).tell(new joinRequest( getSelf() ) , getSelf());
+				getContext().actorSelection(remotePath).tell(new joinRequest( getSelf(), privateId ) , getSelf());
 				System.out.println("ho mandato il messaggio");
+				this.maxMessagge = 20;
 			}
 			else{
 				//il coordinatore si riconosce e si autosetta il proprio id
@@ -198,54 +225,80 @@ public class NodeApp {
 				System.out.println("e questa e' la view: " + view.toString() );
 				getSelf().tell(new heart(id), getSelf());
 				
+				filename = filename + "output" + this.id + ".txt";
+				
+				log("Initializing peer " + this.id + " \n");
+				this.maxMessagge = 70;
 			}
 		}
 		
 		private void onJoinRequest (joinRequest mess){
-			System.out.println("mi e' arrivata una richiesta da: " + mess.ref);
+			System.out.println("mi e' arrivata una richiesta da: " + mess.ref + " con privateID : " + mess.idPeer);
 			
-			//controllo che sto cambiando gia view, se è cosi
-			//estendo la nuova view e non la vecchia
-			if(newView != null){
-				System.out.println("sta avvenendo una entrata mentre stiamo cambiando view, quindi estendo la nuova view");
-				Map<Integer, actorData> tempview = new HashMap<>();
-				newIDview = newIDview+1;
-				tempview.putAll(newView);
-				tempview.put(IDactor, new actorData(mess.ref, null, 0));
-				newView = tempview;
+			if(mess.idPeer < 0){
+				System.out.println("sta cercando di entrare un peer con id negativo, lo metto da parte e lo faro entrare "
+						+ "nei punti cruciali del protocollo");
+				toJoinPeer.add(mess.ref);
 			}
 			else{
-				newIDview = IDview+1;
-				newView = new HashMap<>();
-				newView.putAll(view);
-				newView.put(IDactor, new actorData(mess.ref, null, 0));
+				//controllo che sto cambiando gia view, se è cosi
+				//estendo la nuova view e non la vecchia
+				if(newView != null){
+					System.out.println("sta avvenendo una entrata mentre stiamo cambiando view, quindi estendo la nuova view");
+					Map<Integer, actorData> tempview = new HashMap<>();
+					newIDview = newIDview+1;
+					
+					for(int key : newView.keySet()){
+						tempview.put(key, new actorData(newView.get(key).ref, null, 0));
+					}
+					tempview.put(IDactor, new actorData(mess.ref, null, 0));
+					newView = tempview;
+				}
+				else{
+					newIDview = IDview+1;
+					newView = new HashMap<>();
+					
+					for(int key : view.keySet()){
+						newView.put(key, new actorData(view.get(key).ref, null, 0));
+					}
+					newView.put(IDactor, new actorData(mess.ref, null, 0));
+				}
+
+				//pulire tutti i last message perche non li devo mandare in giro.
+				
+				/*
+				for (int key : newView.keySet()){
+					newView.get(key).lastMessage = null;
+					newView.get(key).timer = 0;
+				}*/
+
+				//mando un messaggio a chi vuole entrare
+				System.out.println("sto mandando il messaggio a: " + IDactor);
+				mess.ref.tell(new joinResponse(IDactor), getSelf());
+
+				//ciclo for per mandare a tutti nella nuova view il messaggio di changeview !
+				//mettere questo ciclo in una funzione e sara nominata multicast
+
+				for (int key : newView.keySet()){
+					System.out.println("mando il messaggio di changeview a: " + key + " --- " + newView.get(key).ref.toString());
+					newView.get(key).ref.tell(new changeView(newIDview, newView), getSelf());
+				}
+
+				IDactor++;
+				
+				if(joinOnJoin && !toJoinPeer.isEmpty() && ! joinOnJoinexetuted){
+					ActorRef refNewPeer = toJoinPeer.poll();
+					joinOnJoinexetuted = true;
+					onJoinRequest(new joinRequest(refNewPeer, 1));
+				}
 			}
-			
-			//pulire tutti i last message perche non li devo mandare in giro.
-			
-			for (int key : newView.keySet()){
-				newView.get(key).lastMessage = null;
-				newView.get(key).timer = 0;
-			}
-			
-			//mando un messaggio a chi vuole entrare
-			System.out.println("sto mandando il messaggio a: " + IDactor);
-			mess.ref.tell(new joinResponse(IDactor), getSelf());
-			
-			//ciclo for per mandare a tutti nella nuova view il messaggio di changeview !
-			//mettere questo ciclo in una funzione e sara nominata multicast
-			
-			for (int key : newView.keySet()){
-				System.out.println("mando il messaggio di changeview a: " + key + " --- " + newView.get(key).ref.toString());
-				newView.get(key).ref.tell(new changeView(newIDview, newView), getSelf());
-			}
-			
-			IDactor++;
 		}
 		
 		private void onJoinResponse(joinResponse mess){
 			this.id = mess.IDactor;
 			System.out.println("mi è arrivata la risposta di join e sono: " + mess.IDactor);
+			filename = filename + "output" + this.id + ".txt";
+			log("Initializing peer " + this.id + " \n");
 		}
 		
 		private void onChangeView (changeView mess){
@@ -263,8 +316,11 @@ public class NodeApp {
 
 
 				if(tempFLUSH != null){
+					System.out.println("i tempFLUSH non sono vuoti");
 					for(int key : tempFLUSH.keySet()){
-						newView.get(key).lastMessage = tempFLUSH.get(key);
+						if(newView.containsKey(key)){
+							newView.get(key).lastMessage = tempFLUSH.get(key);
+						}
 					}
 					tempFLUSH = null;
 				}
@@ -319,11 +375,11 @@ public class NodeApp {
 					
 					if(id != 0 || newView.size()==1){
 						if(onJoin){
-							multicast(newView, new FLUSH(id, newIDview - 1));
+							multicast(newView, new FLUSH(id, newIDview - 1, newIDview));
 						}
 						else{
 							//se invece non sono nuovo non c'è nessun problema
-							multicast(newView, new FLUSH(id, IDview));
+							multicast(newView, new FLUSH(id, IDview, newIDview));
 						}
 						System.out.println("finito di mandare i flush");
 
@@ -337,6 +393,15 @@ public class NodeApp {
 						//sono il coordinator e quindi li mando dopo
 					}
 				}
+			}
+			
+			if(id == 0 && joinOnChange && !joinOnChangeExecuted && !toJoinPeer.isEmpty() && newIDview > 2){
+				//inserisco un nuovo peer quando sto facendo un change view
+				
+				ActorRef refNewPeer = toJoinPeer.poll();
+				joinOnChangeExecuted = true;
+				onJoinRequest(new joinRequest(refNewPeer, 1));
+				
 			}
 			
 		}
@@ -357,7 +422,7 @@ public class NodeApp {
 					
 				}
 			}
-            else if(newView != null && onChange){
+            else if(newView != null && onChange && mess.IDnewView == newIDview){
 			
 				//qui si inserisce il controllo che se il sender del flush è il coordinator la view viene 
 				//installata senza aspettare gli altri FLUSH
@@ -399,7 +464,7 @@ public class NodeApp {
 						else if(id == 0 && numFlush == (newView.size()-1) ){
 							//multicast flush
 							System.out.println("Sono il coordinator: comuncio a mandare i flush");
-							multicast(newView, new FLUSH(id, IDview));
+							multicast(newView, new FLUSH(id, IDview, newIDview));
 							System.out.println("Sono il coordinator: finito di mandare i flush");
 						}
 					}
@@ -416,6 +481,19 @@ public class NodeApp {
 					}
 				}
 			}
+			else if(mess.IDnewView < newIDview){
+				System.out.println("!!!!!!!!!!!!!mi è arrivato un messaggio di flush non per la mia nuova view lo ignoro per " + mess.IDnewView +
+						"deve essere per " + newIDview );
+			}
+			else if(mess.IDnewView > newIDview){
+				//mi è arrivato un flush per una view futura e quindi dovrei tenerlo da parte
+				System.out.println("!!!!!!!!!!!mi è arrivato un messaggio di flush non per la mia nuova view lo tengo da parte per " + mess.IDnewView +
+						"deve essere per " + newIDview );
+				if(tempFLUSH == null){
+					tempFLUSH = new HashMap<>();
+				}
+				tempFLUSH.put(mess.ID, mess);
+			}
 			else{
 				System.out.println("!!!sono arrivato in un punto del protocollo morto controllo!!!!");
 			}
@@ -424,7 +502,7 @@ public class NodeApp {
 		private void onNormalMessage(normalMessage mess){
             
 			System.out.println("arrivato messaggio da : " + mess.senderID + " partito nella view " + mess.IDview + 
-					" sono nella view " + IDview + " con prossima view " + newIDview);
+					" sono nella view " + IDview + " con prossima view " + newIDview + " con messagge id " + mess.messageID);
 			
 			//faccio lo stesso controllo che se per caso mi arriva un messaggio da un peer 
 			//dichiarato morto per sbaglio lo ignoro
@@ -436,6 +514,9 @@ public class NodeApp {
 
 					if(last!= null){
 						deliver((normalMessage)last);
+					}
+					else{
+						System.out.println("!!!!!!!!!!!!il last message era null");
 					}
 
 					view.get(mess.senderID).lastMessage = mess;
@@ -460,7 +541,7 @@ public class NodeApp {
 				
 			}
 
-			if(!onChange && messageID < 400 && mess.senderID == id){
+			if(!onChange && messageID < maxMessagge && mess.senderID == id){
 				
 				/*if(id == 1 && messageID == 20){
 					System.out.println("fingo di morire");
@@ -477,6 +558,10 @@ public class NodeApp {
 				System.out.println("nella onNormalMessage inizio invio messaggio " + m.messageID + " appartenente alla view " + IDview);
 
 				multicast(view, m);
+			}
+			else if(messageID == maxMessagge && id != 0){
+				//context().stop(getSelf());
+				isFinish = true;
 			}
                  
             
@@ -555,7 +640,7 @@ public class NodeApp {
 			}
 			
 			
-			if(m.idSender == id){
+			if(m.idSender == id && !isFinish){
 				try {
 					Thread.sleep(500);
 				} catch (InterruptedException ex) {
@@ -644,6 +729,9 @@ public class NodeApp {
             
 			System.out.println("<"+id+"> INSTALL VIEW " + newIDview + "--" + printView(newView));
 			
+			//write log
+			log(" "+id+" install view " + newIDview + "  " + printPartecipantView(newView) + " \n");
+			
 			this.view = this.newView;
 			this.newView = null;
 			
@@ -670,7 +758,7 @@ public class NodeApp {
 			}
 			
 			//metto un controllo cosi ne invia solo un numero fisso
-			if(messageID < 400){
+			if(messageID < maxMessagge){
 				//qui cominciamo a inviare oppure a riprendere
 
 				normalMessage m = new normalMessage(id, messageID, IDview);
@@ -680,6 +768,10 @@ public class NodeApp {
 				
 				multicast(view, m);
 			}
+			else if(messageID >= maxMessagge && id != 0){
+				//context().stop(getSelf());
+				isFinish = true;
+			}
 		}
 		
 		private void timeCheck(Map<Integer, actorData> currentview){
@@ -688,12 +780,17 @@ public class NodeApp {
 			
 			long current = System.currentTimeMillis();
 			
-			int timeout = 6000; //sono millisecond
+			int timeout = 8000; //sono millisecond
 								//abbiamo incrementato il timer per il problema che grazie agli
 								//heartbit il tutto diventa più lento.
 			
 			Map<Integer, actorData> tempView = new HashMap<>();
-			tempView.putAll(currentview);
+			
+			
+			for(int key : currentview.keySet()){
+				//tempView.putAll(currentview);
+				tempView.put(key, new actorData(currentview.get(key).ref, null, 0));
+			}
 			
 			boolean crash = false;
 			
@@ -767,16 +864,6 @@ public class NodeApp {
 		}
 		
 		
-		private int getKeyFromValue(Map<Integer, actorData> m, ActorRef re){
-			int returnedKey = 0;
-			for(int key : m.keySet()){
-				if(m.get(key).ref == re){
-					returnedKey = key;
-				}
-			}
-			return returnedKey;
-		}
-		
 		private String printView(Map<Integer, actorData> m){
 			String word = "";
 			word = word + "{ \n" ;
@@ -796,9 +883,20 @@ public class NodeApp {
 			return word;
 		}
 		
+		private String printPartecipantView(Map<Integer, actorData> m){
+			String word = "";
+			
+			for(int key : m.keySet()){
+				word = word + key + "," ;
+			}
+			
+			return word;
+		}
+		
 		private void deliver(normalMessage m){
 			System.out.println("<"+id+"> Deliver nuovo messaggio con id : " + m.messageID + " mandato da: " 
 					+ m.senderID + " inviata nella view : " + m.IDview + " siamo nella view " + IDview);
+			log(" "+id+" deliver multicast " + m.messageID + " from " + m.senderID + " within " + IDview + "\n");
 		}
 		
 		private void multicast(Map<Integer, actorData> v, genericMessage m){
@@ -806,6 +904,8 @@ public class NodeApp {
 			if(m instanceof normalMessage){
 				System.out.println("<"+id+"> SEND MULTICAST " + ((normalMessage)m).messageID 
 						+ " NELLA VIEW " + ((normalMessage)m).IDview);
+				//log write
+				log(" "+id+" send multicast " + ((normalMessage) m).messageID + " within " + IDview + " \n");
 			}
 			try {
 				Thread.sleep(timeSleep);
@@ -843,7 +943,14 @@ public class NodeApp {
 			
 		}
 
-		
+		private void log(String content){
+			try (BufferedWriter out = new BufferedWriter(new FileWriter(filename, fileReset))){
+				out.append(content);
+				fileReset = true;
+			} catch (IOException ex) {
+				Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
+			}
+		}
 		
 		@Override
 		public Receive createReceive() {
@@ -865,6 +972,7 @@ public class NodeApp {
 		Config config = ConfigFactory.load();
 		int myId = config.getInt("nodeapp.id");
 		String remotePath = null;
+		boolean addJoinPeer = false;
 
 		if (config.hasPath("nodeapp.remote_ip")) {
 			String remote_ip = config.getString("nodeapp.remote_ip");
@@ -876,13 +984,43 @@ public class NodeApp {
 		} else {
 			System.out.println("Starting disconnected node " + myId);
 		}
+		
+		if(config.hasPath("nodeapp.joinPeer")){
+			addJoinPeer = config.getBoolean("nodeapp.joinPeer");
+		}
+		
+		if(myId == 0){
+			System.out.println("Starting coordinator system");
+		}
 		// Create the actor system
 		final ActorSystem system = ActorSystem.create("mysystem", config);
 
+		
 		// Create a single node actor locally
-		final ActorRef receiver = system.actorOf(
-				Node.props(myId, remotePath),
-				"node" // actor name
-		);
+		if(myId == 0){
+			final ActorRef receiver = system.actorOf(
+					Node.props(myId, null),
+					"node" // actor name
+			);
+		}
+		else{
+			final ActorRef receiver = system.actorOf(
+					Node.props(myId, remotePath),
+					"node" // actor name
+			);
+		}
+		
+		
+		if(myId == 0 && addJoinPeer){
+			system.actorOf(Node.props(myId - 1, remotePath),
+				"peer1"
+			);
+			system.actorOf(Node.props(myId - 2, remotePath),
+				"peer2"
+			);
+			
+		}else if(myId == 0){
+			System.out.println("sono il coordinator ma non inserisco nessun nuovo peer");
+		}
 	}
 }
