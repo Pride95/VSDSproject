@@ -211,6 +211,11 @@ public class NodeApp {
 				filename = filename + "output" + this.id + ".txt";
 				log("Initializing peer " + this.id + " \n");
 				this.maxMessagge = 70;
+				crashNormal = false;
+				crashCache = false;
+				crashFlush = false;
+				crashChange = false;
+				isCrash = false;
 			}
 		}
 		
@@ -249,7 +254,7 @@ public class NodeApp {
 					newView.get(key).ref.tell(new changeView(newIDview, newView), getSelf());
 				}
 				IDactor++;
-				if(joinOnJoin && !toJoinPeer.isEmpty() && ! joinOnJoinexetuted){
+				if(joinOnJoin && !toJoinPeer.isEmpty() && ! joinOnJoinexetuted && IDview > 2){
 					ActorRef refNewPeer = toJoinPeer.poll();
 					joinOnJoinexetuted = true;
 					onJoinRequest(new joinRequest(refNewPeer, 1));
@@ -265,9 +270,9 @@ public class NodeApp {
 		}
 		
 		private void onChangeView (changeView mess){
-			if(crashChange && id == 1 && IDview ==1){
+			if(crashChange && id != 0 && IDview >= 3){
 				isCrash = true;
-				System.out.println("sono il peer 1 e crasho appena ricevuto il messaggio di change view e sono nella view 1");
+				System.out.println("i am the peer " + id + " and i will crash now");
 				context().stop(getSelf());
 			}
 			else{
@@ -342,7 +347,7 @@ public class NodeApp {
 					else{}
 				}
 			}
-			if(id == 0 && joinOnChange && !joinOnChangeExecuted && !toJoinPeer.isEmpty() && newIDview > 2){
+			if(id == 0 && joinOnChange && !joinOnChangeExecuted && !toJoinPeer.isEmpty() && newIDview > 3){
 				ActorRef refNewPeer = toJoinPeer.poll();
 				joinOnChangeExecuted = true;
 				onJoinRequest(new joinRequest(refNewPeer, 1));
@@ -735,16 +740,14 @@ public class NodeApp {
 				}
 				
 				if(crashCache && id != 0 && (m instanceof cacheMessage)){
-					System.out.println("sono il peer 1 e sto il messaggio di cache ma fingo il crash");
+					System.out.println("i am the peer " + id + " and i will crash now");
 					context().stop(getSelf());
 					isCrash = true;
 					break;
 				}
 				
-				
-				if(crashFlush && id != 0 && IDview == 1 && (m instanceof FLUSH)){
-					
-					System.out.println("sono il peer 1 e sto mandando un messaggio di flush e fingo il crach");
+				if(crashFlush && id != 0 && IDview >= 3 && (m instanceof FLUSH)){
+					System.out.println("i am the peer " + id + " and i will crash now");
 					context().stop(getSelf());
 					isCrash = true;
 					break;
