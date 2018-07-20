@@ -161,17 +161,35 @@ public class NodeApp {
 		private boolean joinOnChangeExecuted = false;
 		
 		private boolean fileReset = false;
-		
 		private boolean isFinish = false;
 		
 		/* -- Actor constructor --------------------------------------------------- */
-		public Node(String remotePath, int privateID) {
+		public Node(String remotePath, int privateID, boolean[] conditions) {
 			this.remotePath = remotePath;
 			this.privateId = privateID;
+			/*
+			in order we have
+			0 : crash normal
+			1 : crash cache
+			2 : crash flush
+			3 : crash change
+
+			4 : join peer (for coord.)
+			5 : join on join (for coord.)
+			6 : join on change
+			*/
+			crashNormal = conditions[0];
+			crashCache = conditions[1];
+			crashFlush = conditions[2];
+			crashChange = conditions[3];
+			
+			joinOnJoin = conditions[4];
+			joinOnChange = conditions[5];
+			
 		}
 
-		static public Props props(int id, String remotePath) {
-			return Props.create(Node.class, () -> new Node(remotePath, id));
+		static public Props props(int id, String remotePath, boolean[] conditions) {
+			return Props.create(Node.class, () -> new Node(remotePath, id, conditions));
 		}
 		
 		@Override
@@ -709,14 +727,14 @@ public class NodeApp {
 			}
 			for(int key : v.keySet()){
 				v.get(key).ref.tell(m, getSelf());
-				if(crashNormal && id == 1 && messageID == 10 && (m instanceof normalMessage)){
-					System.out.println("sono il peer 1 e sto mandando il messaggio 10 quindi mi fermo e simulo il crash");
+				if(crashNormal && id != 0 && messageID == 10 && (m instanceof normalMessage)){
+					System.out.println("i am the peer " + id + " and i will crash now after sending the messagge " + messageID);
 					context().stop(getSelf());
 					isCrash = true;
 					break;
 				}
 				
-				if(crashCache && id == 1 && (m instanceof cacheMessage)){
+				if(crashCache && id != 0 && (m instanceof cacheMessage)){
 					System.out.println("sono il peer 1 e sto il messaggio di cache ma fingo il crash");
 					context().stop(getSelf());
 					isCrash = true;
@@ -724,7 +742,7 @@ public class NodeApp {
 				}
 				
 				
-				if(crashFlush && id == 1  && IDview == 1 && (m instanceof FLUSH)){
+				if(crashFlush && id != 0 && IDview == 1 && (m instanceof FLUSH)){
 					
 					System.out.println("sono il peer 1 e sto mandando un messaggio di flush e fingo il crach");
 					context().stop(getSelf());
@@ -764,6 +782,18 @@ public class NodeApp {
 		int myId = config.getInt("nodeapp.id");
 		String remotePath = null;
 		boolean addJoinPeer = false;
+		boolean[] conditions = new boolean[6];
+		/*
+		in order we have
+		0 : crash normal
+		1 : crash cache
+		2 : crash flush
+		3 : crash change
+		
+		
+		4 : join on join (for coord.)
+		5 : join on change
+		*/
 
 		if (config.hasPath("nodeapp.remote_ip")) {
 			String remote_ip = config.getString("nodeapp.remote_ip");
@@ -776,9 +806,45 @@ public class NodeApp {
 			System.out.println("Starting disconnected node " + myId);
 		}
 		
-		if(config.hasPath("nodeapp.joinPeer")){
-			addJoinPeer = config.getBoolean("nodeapp.joinPeer");
+		if(config.hasPath("nodeapp.crashNormal")){
+			conditions[0] = config.getBoolean("nodeapp.crashNormal");
 		}
+		else{
+			conditions[0] = false;
+		}
+		
+		if(config.hasPath("nodeapp.crashCache")){
+			conditions[1] = config.getBoolean("nodeapp.crashCache");
+		}else{
+			conditions[1] = false;
+		}
+		
+		if(config.hasPath("nodeapp.crashFlush")){
+			conditions[2] = config.getBoolean("nodeapp.crashFlush");
+		}else{
+			conditions[2] = false;
+		}
+		
+		if(config.hasPath("nodeapp.crashChange")){
+			conditions[3] = config.getBoolean("nodeapp.crashChange");
+		}else{
+			conditions[3] = false;
+		}
+		
+		
+		if(config.hasPath("nodeapp.joinOnJoin")){
+			conditions[4] = config.getBoolean("nodeapp.joinOnJoin");
+		}else{
+			conditions[4] = false;
+		}
+		
+		if(config.hasPath("nodeapp.joinOnChange")){
+			conditions[5] = config.getBoolean("nodeapp.joinOnChange");
+		}else{
+			conditions[5] = false;
+		}
+		
+		
 		
 		if(myId == 0){
 			System.out.println("Starting coordinator system");
@@ -790,23 +856,23 @@ public class NodeApp {
 		// Create a single node actor locally
 		if(myId == 0){
 			final ActorRef receiver = system.actorOf(
-					Node.props(myId, null),
+					Node.props(myId, null, conditions),
 					"node" // actor name
 			);
 		}
 		else{
 			final ActorRef receiver = system.actorOf(
-					Node.props(myId, remotePath),
+					Node.props(myId, remotePath, conditions),
 					"node" // actor name
 			);
 		}
 		
 		
 		if(myId == 0 && addJoinPeer){
-			system.actorOf(Node.props(myId - 1, remotePath),
+			system.actorOf(Node.props(myId - 1, remotePath, conditions),
 				"peer1"
 			);
-			system.actorOf(Node.props(myId - 2, remotePath),
+			system.actorOf(Node.props(myId - 2, remotePath, conditions),
 				"peer2"
 			);
 		}else if(myId == 0){
