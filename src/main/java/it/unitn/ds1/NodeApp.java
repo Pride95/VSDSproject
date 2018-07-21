@@ -199,7 +199,7 @@ public class NodeApp {
 				onJoin = true;
 				System.out.println("attempt to enter with contacting " + remotePath);
 				getContext().actorSelection(remotePath).tell(new joinRequest( getSelf(), privateId ) , getSelf());
-				System.out.println("request sended");
+				System.out.println("request sent");
 				this.maxMessagge = 20;
 			}
 			else{
@@ -220,16 +220,16 @@ public class NodeApp {
 		}
 		
 		private void onJoinRequest (joinRequest mess){
-			System.out.println("join request recived from: " + mess.ref + " with privateID : " + mess.idPeer);
+			System.out.println("join request received from: " + mess.ref + " with privateID : " + mess.idPeer);
 			
 			if(mess.idPeer < 0){
-				System.out.println("the requested peer is a peer with negative id, i put aside it and insert it in key point of the protocol");
+				System.out.println("the requested peer is a peer with negative id, I put aside it and insert it in a key point of the protocol");
 				toJoinPeer.add(mess.ref);
 			}
 			else{
 				//check if we are in change view
 				if(newView != null){
-					System.out.println("attempt of inserting a new peer during a chenge view, so i update the new view");
+					System.out.println("attempt of inserting a new peer during a change view, so I update the new view");
 					Map<Integer, actorData> tempview = new HashMap<>();
 					newIDview = newIDview+1;
 					for(int key : newView.keySet()){
@@ -264,7 +264,7 @@ public class NodeApp {
 		
 		private void onJoinResponse(joinResponse mess){
 			this.id = mess.IDactor;
-			System.out.println("I recive a join response and my new ID is: " + mess.IDactor);
+			System.out.println("I've received a join response and my new ID is: " + mess.IDactor);
 			filename = filename + "output" + this.id + ".txt";
 			log("Initializing peer " + this.id + " \n");
 		}
@@ -272,7 +272,7 @@ public class NodeApp {
 		private void onChangeView (changeView mess){
 			if(crashChange && id != 0 && IDview >= 3){
 				isCrash = true;
-				System.out.println("i am the peer " + id + " and i will crash now");
+				System.out.println("I am the peer " + id + " and I will crash now");
 				context().stop(getSelf());
 			}
 			else{
@@ -281,7 +281,7 @@ public class NodeApp {
 				this.newView = mess.newView;
 				//here there are possible FLUSH comming before i start change view
 				if(tempFLUSH != null){
-					System.out.println("i tempFLUSH non sono vuoti");
+					System.out.println("the tempFLUSHes aren't empty ");
 					for(int key : tempFLUSH.keySet()){
 						//in the if i check if the flush in the tempFLUSH is correct for the new View
 						if(newView.containsKey(key) && ((FLUSH)tempFLUSH.get(key)).IDnewView == newIDview){
@@ -303,7 +303,7 @@ public class NodeApp {
 							normalMessage last = (normalMessage)view.get(key).lastMessage;
 
 							System.out.println("sending messagge " + last.messageID +
-									" comming from " + last.senderID + 
+									" coming from " + last.senderID + 
 									" from the view " + last.IDview);
 							cacheMessage c = new cacheMessage(id, last.senderID, last.messageID, last.IDview);
 							if(!isCrash){
@@ -323,7 +323,7 @@ public class NodeApp {
 					}
 				}
 				else{
-					System.out.println("I'm new so i need to send only FLUSH");
+					System.out.println("I'm new so I need to send only FLUSH");
 				}
 
 
@@ -339,7 +339,7 @@ public class NodeApp {
 						System.out.println(">>> END FLUSH");
 
 						if(onJoin){
-							System.out.println("i'm new i'm starting sending heartbeat");
+							System.out.println("I'm new and I'm starting sending heartbeat");
 							newView.get(0).ref.tell(new heart(id), getSelf());
 							getSelf().tell(new heart(id), getSelf());
 						}
@@ -355,9 +355,9 @@ public class NodeApp {
 		}
 		
 		private void onFLUSH (FLUSH mess){
-			System.out.println("arrived FLUSH message from: " + mess.ID + " sendend in the view: " + mess.IDview);
+			System.out.println("arrived FLUSH message from: " + mess.ID + " sent in the view: " + mess.IDview);
 			if(newView == null && !onChange){
-				System.out.println("arrived a flush before i was in the change view");
+				System.out.println("arrived a flush before I was in the change view");
 				if (mess.IDview >= IDview){
 					if(tempFLUSH == null){
 						tempFLUSH = new HashMap<>();
@@ -367,7 +367,7 @@ public class NodeApp {
 			}
             else if(newView != null && onChange && mess.IDnewView == newIDview){
 				if(mess.ID == 0){
-					System.out.println("stable view because it arrived a FLUSH from the coordinator");
+					System.out.println("stable view because it is arrived a FLUSH from the coordinator");
 					installView();
 				}
 				else{
@@ -395,7 +395,7 @@ public class NodeApp {
 						}
 
 						if(install){
-							System.out.println("view stabile ora installo");
+							System.out.println("view stable, now I can install it");
 							installView();
 						}
 						else if(id == 0 && numFlush == (newView.size()-1) ){
@@ -405,18 +405,18 @@ public class NodeApp {
 						}
 					}
 					else{
-						System.out.println("!!!ignorato un messaggio di FLUSH proveniente da " + mess.ID + " inviato nella view " 
+						System.out.println("!!!ignored FLUSH message coming from " + mess.ID + " sent in the view " 
 								+ mess.IDview );
 					}
 				}
 			}
 			else if(mess.IDnewView < newIDview){
-				System.out.println("!!!!!!!!!!!!!mi è arrivato un messaggio di flush non per la mia nuova view lo ignoro per " + mess.IDnewView +
-						"deve essere per " + newIDview );
+				System.out.println("!!!!!!!!!!!!!A FLUSH message came, not for my new view so I'll ignore it. its view is " + mess.IDnewView +
+						"but should be " + newIDview );
 			}
 			else if(mess.IDnewView > newIDview){
-				System.out.println("!!!!!!!!!!!mi è arrivato un messaggio di flush non per la mia nuova view lo tengo da parte per " + mess.IDnewView +
-						"deve essere per " + newIDview );
+				System.out.println("!!!!!!!!!!!A FLUSH message came, not for my new view so I'll store it away. its view is  " + mess.IDnewView +
+						"but should be " + newIDview );
 				if(tempFLUSH == null){
 					tempFLUSH = new HashMap<>();
 				}
@@ -428,8 +428,8 @@ public class NodeApp {
 		}
 		
 		private void onNormalMessage(normalMessage mess){
-			System.out.println("arrived messagge from: " + mess.senderID + " send in view:" + mess.IDview + 
-					" i'm in the view " + IDview + " with next view " + newIDview + " messagge id " + mess.messageID);
+			System.out.println("arrived messagge from: " + mess.senderID + " sent in view:" + mess.IDview + 
+					" I'm in the view " + IDview + " with next view " + newIDview + " messagge id " + mess.messageID);
 			if(!onChange){
 				if(view.containsKey(mess.senderID)){
 					genericMessage last = view.get(mess.senderID).lastMessage;
@@ -490,14 +490,14 @@ public class NodeApp {
 		
 		private void onHeart(heart m){
 			if(id == 0){
-				System.out.println("arrivato heartbit da " + m.idSender);
+				System.out.println("heartbeat came from " + m.idSender);
 				if(onChange){
 					if(newView.containsKey(m.idSender)){
 						newView.get(m.idSender).timer = System.currentTimeMillis();
 						timeCheck(newView);
 					}
 					else{
-						System.out.println("arrived a heartbeat from a peer defined dead");
+						System.out.println("arrived an heartbeat from a peer defined dead");
 					}
 				}
 				else{
@@ -506,7 +506,7 @@ public class NodeApp {
 						timeCheck(view);
 					}
 					else{
-						System.out.println("arrived a heartbeat from a peer defined dead");
+						System.out.println("arrived an heartbeat from a peer defined dead");
 					}
 				}
 			}
@@ -517,7 +517,7 @@ public class NodeApp {
 					Logger.getLogger(NodeApp.class.getName()).log(Level.SEVERE, null, ex);
 				}
 
-				System.out.println("restart heartbit");
+				System.out.println("restart heartbeat");
 				if(newView != null){
 					newView.get(0).ref.tell(new heart(id), getSelf());
 				}
@@ -556,7 +556,7 @@ public class NodeApp {
 								if(view.get(m.senderID).lastMessage != null){
 									normalMessage last = (normalMessage) view.get(m.senderID).lastMessage;
 									if(last.messageID < m.messageID){
-										System.out.println("the message is correct and now i deliver it");
+										System.out.println("the message is correct and now I deliver it");
 										deliver(m);
 									}
 								}
@@ -645,7 +645,7 @@ public class NodeApp {
 					
 					if(firstcheck && secondcheck){
 						sendnewview = false;
-						System.out.println("i was to send a duplicate change view, i avoided it");
+						System.out.println("I was sending a duplicate change view, I avoided it");
 					}
 					else if(firstcheck && !secondcheck){
 						Map<Integer, actorData> newPeers = new HashMap<>();
@@ -655,16 +655,16 @@ public class NodeApp {
 						for(int key : view.keySet()){
 							newPeers.remove(key);
 						}
-						System.out.println("<<<<<sono nel caso in cui sto cambiando view ma trovo un peer crasiato e quindi devo investigare se c'e un peer "
-								+ "aggiunto che potrei perdere");
+						System.out.println("<<<<<I'm in the changeView but I've found a crashed peer thus I must see if there is a peer "
+								+ "added that I could lose");
 						if(!newPeers.isEmpty()){
-							System.out.println("<<<<ho tolto dalla nuova view tutti i peer vecchi e quindi questi rimanenti sono quelli in piu");
+							System.out.println("<<<<I took out from the view all the old peers so the remains are the ones in addition");
 							for(int key : newPeers.keySet()){
 								tempView.put(key, newPeers.get(key));
 							}
 						}
 						else{
-							System.out.println("<<<<falso allarme di perdita di peer");
+							System.out.println("<<<<false alarm of lost peer");
 						}
 					}
 				}
@@ -733,21 +733,21 @@ public class NodeApp {
 			for(int key : v.keySet()){
 				v.get(key).ref.tell(m, getSelf());
 				if(crashNormal && id != 0 && messageID == 10 && (m instanceof normalMessage)){
-					System.out.println("i am the peer " + id + " and i will crash now after sending the messagge " + messageID);
+					System.out.println("i am the peer " + id + " and I will crash now after sending the messagge " + messageID);
 					context().stop(getSelf());
 					isCrash = true;
 					break;
 				}
 				
 				if(crashCache && id != 0 && (m instanceof cacheMessage)){
-					System.out.println("i am the peer " + id + " and i will crash now");
+					System.out.println("I am the peer " + id + " and I will crash now");
 					context().stop(getSelf());
 					isCrash = true;
 					break;
 				}
 				
 				if(crashFlush && id != 0 && IDview >= 3 && (m instanceof FLUSH)){
-					System.out.println("i am the peer " + id + " and i will crash now");
+					System.out.println("I am the peer " + id + " and I will crash now");
 					context().stop(getSelf());
 					isCrash = true;
 					break;
@@ -879,7 +879,7 @@ public class NodeApp {
 				"peer2"
 			);
 		}else if(myId == 0){
-			System.out.println("i am the coordinator but i dont start any more peer");
+			System.out.println("I am the coordinator but i don't start any more peer");
 		}
 	}
 }
